@@ -36,6 +36,37 @@
 | 数据导入导出 | ✅ | ✅ |
 | 文件上传 | ✅ | ✅ |
 
+## 项目结构
+
+```
+functions/                  # EdgeOne Pages Functions (API 端点)
+├── index.js               # 根路径重定向
+├── ui.js                  # 管理后台 UI
+└── api/                   # API 端点
+    ├── _utils.js          # 工具函数
+    ├── health.js          # 健康检查
+    ├── version.js         # 版本信息
+    ├── register.js        # 用户注册
+    ├── token.js           # 登录/Token 管理
+    ├── comment.js         # 评论 CRUD
+    ├── user.js            # 用户信息
+    ├── article.js         # 文章统计
+    ├── count.js           # 评论计数
+    ├── recent.js          # 最新评论
+    ├── hot.js             # 热门评论
+    ├── stat.js            # 统计数据
+    ├── reaction.js        # 文章反应
+    └── admin/             # 管理后台 API
+        ├── comment.js
+        ├── user.js
+        └── config.js
+src/                      # 源代码
+├── api/                  # API 逻辑类
+├── service/              # 服务层
+├── ui/                   # UI 层
+└── utils/                # 工具函数
+```
+
 ## 快速开始
 
 ### 1. 创建 KV 命名空间

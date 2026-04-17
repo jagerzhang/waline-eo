@@ -1,12 +1,44 @@
 # EdgeOne 部署指南
 
+## 项目结构
+
+```
+waline-edgeone-full/
+├── functions/              # EdgeOne Pages Functions
+│   ├── index.js           # 根路径重定向到 /ui
+│   ├── ui.js              # 管理后台 UI
+│   └── api/               # API 端点
+│       ├── health.js      # 健康检查
+│       ├── version.js     # 版本信息
+│       ├── register.js    # 用户注册
+│       ├── token.js       # 登录/Token 管理
+│       ├── comment.js     # 评论 API
+│       ├── user.js        # 用户 API
+│       ├── article.js     # 文章统计
+│       ├── count.js       # 评论计数
+│       ├── recent.js      # 最新评论
+│       ├── hot.js         # 热门评论
+│       ├── stat.js        # 统计数据
+│       ├── reaction.js    # 文章反应
+│       └── admin/         # 管理后台 API
+│           ├── comment.js
+│           ├── user.js
+│           └── config.js
+├── src/                   # 源代码
+│   ├── api/              # API 逻辑
+│   ├── service/          # 服务层
+│   ├── ui/               # UI 层
+│   └── utils/            # 工具函数
+└── _routes.json          # 路由配置
+```
+
 ## 部署步骤
 
 ### 1. 创建 GitHub 仓库
 
 ```bash
 # 进入项目目录
-cd D:\qoder\waline-edgeone-full
+cd waline-edgeone-full
 
 # 初始化 Git 仓库
 git init
@@ -63,22 +95,11 @@ git push -u origin main
 
 | 变量名 | 值 | 说明 |
 |-------|-----|------|
-| `JWT_TOKEN` | 随机字符串 | 生成：`openssl rand -base64 32` |
-| `ADMIN_EMAIL` | 你的邮箱 | 管理员登录邮箱 |
-| `ADMIN_PASSWORD_HASH` | SHA256 哈希 | 见下方生成方法 |
+| `JWT_TOKEN` | 随机字符串 | 用于 JWT 签名，生成：`openssl rand -base64 32` |
 | `SITE_NAME` | 站点名称 | 如：My Blog |
 | `SITE_URL` | 站点 URL | 如：https://your-site.com |
 
-#### 生成密码哈希
-
-在浏览器控制台运行：
-```javascript
-async function sha256(text) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-sha256('你的密码').then(console.log);
-```
+> **注意**：第一个注册的用户将自动成为管理员，无需预设管理员密码。
 
 #### 可选变量
 
@@ -136,7 +157,32 @@ TG_CHAT_ID=chat-id
 https://your-project.pages.dev/ui
 ```
 
-使用管理员邮箱和密码登录。
+**首次使用说明：**
+1. 第一个注册的用户将自动成为管理员
+2. 点击"还没有账号？立即注册"进行注册
+3. 注册成功后自动登录为管理员
+
+### API 端点
+
+部署后，以下 API 端点可用：
+
+| 端点 | 方法 | 说明 |
+|-----|------|------|
+| `/health` | GET | 健康检查 |
+| `/version` | GET | 版本信息 |
+| `/register` | POST | 用户注册 |
+| `/token` | POST/PUT/DELETE | 登录/更新资料/退出 |
+| `/comment` | GET/POST/PUT/DELETE | 评论操作 |
+| `/user` | GET/PUT | 用户信息 |
+| `/article` | GET/POST | 文章统计 |
+| `/count` | GET | 评论计数 |
+| `/recent` | GET | 最新评论 |
+| `/hot` | GET | 热门评论 |
+| `/stat` | GET/PUT | 统计数据 |
+| `/reaction` | GET/POST | 文章反应 |
+| `/admin/comment` | GET/PUT/DELETE | 管理评论 |
+| `/admin/user` | GET/PUT/DELETE | 管理用户 |
+| `/admin/config` | GET/PUT | 系统配置 |
 
 ### 8. 前端集成
 
@@ -181,7 +227,13 @@ EdgeOne 会自动重新部署。
 
 ### 登录失败
 - 检查 `JWT_TOKEN` 是否设置
-- 检查 `ADMIN_EMAIL` 和 `ADMIN_PASSWORD_HASH` 是否正确
+- 检查邮箱和密码是否正确
+- 第一个注册的用户自动成为管理员
+
+### 注册返回 XML 错误
+- 检查 Functions 文件是否正确部署
+- 检查 `_routes.json` 是否存在
+- 查看 EdgeOne Pages 的实时日志
 
 ### 邮件发送失败
 - 检查 SMTP 配置
