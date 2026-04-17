@@ -5,10 +5,10 @@ import { WalineKV } from '../src/kv.js';
 import { CommentAPI } from '../src/api/comment.js';
 import { UserAPI } from '../src/api/user.js';
 import { AdminAPI } from '../src/api/admin.js';
-import { NotifyService } from '../src/service/notify.js';
+import { notify } from '../src/service/notify.js';
 import { MarkdownService } from '../src/service/markdown-simple.js';
-import { AkismetService } from '../src/service/akismet.js';
-import { AvatarService } from '../src/service/avatar.js';
+import { checkSpam } from '../src/service/akismet.js';
+import { getCommentAvatar } from '../src/service/avatar.js';
 import { verify as verifyJWT, extractBearerToken } from '../src/utils/auth.js';
 import { adminUI } from '../src/ui/admin.js';
 
@@ -69,13 +69,29 @@ export async function onRequest(context) {
   // Initialize services
   const db = new WalineKV(env.WALINE_KV);
   const markdown = new MarkdownService(env);
-  const notify = new NotifyService(env, config);
-  const akismet = new AkismetService(config.akismet);
-  const avatar = new AvatarService(config);
+  
+  // Service wrappers for compatibility
+  const notifyService = {
+    run: async (comment, parent, isApproved = false) => {
+      return notify({ ...comment, rawComment: comment.comment }, parent, isApproved, config);
+    }
+  };
+  
+  const akismetService = {
+    check: async (comment) => {
+      return checkSpam(comment, config.akismet);
+    }
+  };
+  
+  const avatarService = {
+    getUrl: (comment) => {
+      return getCommentAvatar(comment, config);
+    }
+  };
 
   // Initialize APIs
-  const commentAPI = new CommentAPI(db, config, markdown, notify, akismet, avatar);
-  const userAPI = new UserAPI(db, config, notify);
+  const commentAPI = new CommentAPI(db, config, markdown, notifyService, akismetService, avatarService);
+  const userAPI = new UserAPI(db, config, notifyService);
   const adminAPI = new AdminAPI(db, config);
 
   // Build context
