@@ -12,6 +12,14 @@ export default async function onRequest(context) {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
+  // Allow GET for simple testing, but require POST for actual debug
+  if (request.method === 'GET') {
+    return new Response(JSON.stringify({
+      errno: 0,
+      message: 'Login debug endpoint is ready. Send POST request with {email, password} to debug login issues.'
+    }), { status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders }});
+  }
+
   if (request.method !== 'POST') {
     return new Response(JSON.stringify({ errno: 405, errmsg: 'Method Not Allowed' }), {
       status: 405, headers: { 'Content-Type': 'application/json', ...corsHeaders }
