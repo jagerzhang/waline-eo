@@ -1,0 +1,19 @@
+{
+  "name": "waline-edgeone",
+  "version": "1.0.0",
+  "description": "Full-featured Waline for EdgeOne Pages - Compatible with @waline/client v3",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler pages dev .",
+    "deploy": "wrangler pages deploy ."
+  },
+  "keywords": ["waline", "comment", "edgeone", "kv"],
+  "license": "MIT",
+  "dependencies": {
+    "markdown-it": "^14.1.1",
+    "markdown-it-emoji": "^3.0.0"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
