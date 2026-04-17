@@ -114,8 +114,15 @@ export default async function onRequest(context) {
           });
         }
 
-        // Find user by email
-        const userId = await globalThis.WALINE_KV.get('email:' + email.toLowerCase());
+        // Find user by email - try multiple key formats for compatibility
+        const emailLower = email.toLowerCase();
+        let userId = await globalThis.WALINE_KV.get('email:' + emailLower);
+
+        // Try alternative key formats if not found
+        if (!userId) {
+          userId = await globalThis.WALINE_KV.get('user:email:' + emailLower);
+        }
+
         if (!userId) {
           return new Response(JSON.stringify({ errno: 401, errmsg: '邮箱或密码错误' }), {
             status: 401,
@@ -136,6 +143,15 @@ export default async function onRequest(context) {
         // Verify password
         const hashedPassword = await hashPassword(password, user.salt || '');
         if (hashedPassword !== user.password) {
+          // Debug info for password mismatch (remove in production)
+          console.error('Password mismatch:', {
+            email: emailLower,
+            userId: userId,
+            hasSalt: !!user.salt,
+            saltLength: user.salt ? user.salt.length : 0,
+            storedHashLength: user.password ? user.password.length : 0,
+            computedHashLength: hashedPassword.length
+          });
           return new Response(JSON.stringify({ errno: 401, errmsg: '邮箱或密码错误' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders }
