@@ -16,9 +16,9 @@ export default async function onRequest(context) {
     const url = new URL(request.url);
     return Response.redirect(`${url.origin}/ui`, 302);
   } catch (e) {
-    return new Response(JSON.stringify({ error: e.message }), { 
+    return new Response(JSON.stringify({ errno: 500, errmsg: e.message }), { 
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json', ...corsHeaders }
     });
   }
 }

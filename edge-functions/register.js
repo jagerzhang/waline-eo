@@ -48,13 +48,19 @@ export default async function onRequest(context) {
     const hashBuf = await crypto.subtle.digest('SHA-256', encoder.encode(password + salt));
     const hash = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
 
+    // Check if this is the first user (make them admin)
+    const allUsers = await kv.list({ prefix: 'user:' });
+    const isFirstUser = allUsers.keys.filter(k => !k.name.includes(':email:')).length === 0;
+
     const user = {
       id: userId,
+      objectId: userId,
       email: email.toLowerCase(),
       password: hash,
       salt: salt,
       nick: nick || email.split('@')[0],
-      type: 'user',
+      type: isFirstUser ? 'administrator' : 'user',
+      role: isFirstUser ? 'admin' : 'user',
       createdAt: new Date().toISOString()
     };
 
@@ -63,7 +69,7 @@ export default async function onRequest(context) {
 
     return new Response(JSON.stringify({
       errno: 0,
-      data: { id: userId, email: user.email, nick: user.nick }
+      data: { objectId: userId, id: userId, email: user.email, nick: user.nick, type: user.type, role: user.role }
     }), { status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders }});
 
   } catch (err) {

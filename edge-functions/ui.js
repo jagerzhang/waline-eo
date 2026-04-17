@@ -13,7 +13,10 @@ export default async function onRequest(context) {
   }
 
   if (request.method !== 'GET') {
-    return new Response('Method Not Allowed', { status: 405 });
+    return new Response(JSON.stringify({ errno: 405, errmsg: 'Method Not Allowed' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders }
+    });
   }
 
   const html = `<!DOCTYPE html>
@@ -106,10 +109,97 @@ export default async function onRequest(context) {
       text-align: center;
     }
     .hidden { display: none !important; }
+    /* Dashboard styles */
+    .dashboard { display: none; min-height: 100vh; }
+    .dashboard-header {
+      background: #27ae60;
+      color: white;
+      padding: 15px 30px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .dashboard-header h1 { font-size: 20px; }
+    .user-info { display: flex; align-items: center; gap: 15px; }
+    .logout-btn {
+      background: rgba(255,255,255,0.2);
+      border: none;
+      color: white;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .dashboard-content {
+      max-width: 1200px;
+      margin: 30px auto;
+      padding: 0 20px;
+    }
+    .stats-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .stat-card {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .stat-card h3 {
+      color: #7f8c8d;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+    .stat-card .number {
+      font-size: 32px;
+      font-weight: bold;
+      color: #27ae60;
+    }
+    .comments-section {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      padding: 20px;
+    }
+    .comments-section h2 {
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid #e1e8ed;
+    }
+    .comment-item {
+      padding: 15px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .comment-item:last-child { border-bottom: none; }
+    .comment-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .comment-author { font-weight: 600; color: #27ae60; }
+    .comment-time { color: #95a5a6; font-size: 12px; }
+    .comment-content { color: #2c3e50; line-height: 1.6; }
+    .comment-actions { margin-top: 10px; }
+    .comment-actions button {
+      background: #e74c3c;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #95a5a6;
+    }
   </style>
 </head>
 <body>
-  <div class="login-page">
+  <!-- Login Page -->
+  <div class="login-page" id="login-page">
     <div class="login-box">
       <h1>Waline</h1>
       <p class="subtitle" id="mode-title">登录到管理后台</p>
@@ -134,6 +224,39 @@ export default async function onRequest(context) {
       <div class="switch-mode">
         <span id="switch-text">还没有账号？</span>
         <a id="switch-link">立即注册</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <div class="dashboard" id="dashboard">
+    <div class="dashboard-header">
+      <h1>Waline 管理后台</h1>
+      <div class="user-info">
+        <span id="user-name"></span>
+        <button class="logout-btn" onclick="logout()">退出登录</button>
+      </div>
+    </div>
+    <div class="dashboard-content">
+      <div class="stats-cards">
+        <div class="stat-card">
+          <h3>总评论数</h3>
+          <div class="number" id="total-comments">0</div>
+        </div>
+        <div class="stat-card">
+          <h3>今日评论</h3>
+          <div class="number" id="today-comments">0</div>
+        </div>
+        <div class="stat-card">
+          <h3>用户数</h3>
+          <div class="number" id="total-users">0</div>
+        </div>
+      </div>
+      <div class="comments-section">
+        <h2>最新评论</h2>
+        <div id="comments-list">
+          <div class="empty-state">加载中...</div>
+        </div>
       </div>
     </div>
   </div>
@@ -198,15 +321,125 @@ export default async function onRequest(context) {
         localStorage.setItem('waline_token', data.data.token);
         localStorage.setItem('waline_user', JSON.stringify(data.data.user));
 
-        alert(isLogin ? '登录成功！' : '注册成功！');
-        // Redirect to dashboard (you can implement this)
-        location.reload();
+        if (isLogin) {
+          // Show dashboard after login
+          showDashboard(data.data.user);
+        } else {
+          alert('注册成功！请登录');
+          location.reload();
+        }
       } catch (err) {
         errorMsg.textContent = err.message;
         submitBtn.disabled = false;
         submitBtn.textContent = isLogin ? '登录' : '注册';
       }
     });
+
+    // Dashboard functions
+    function showDashboard(user) {
+      document.getElementById('login-page').style.display = 'none';
+      document.getElementById('dashboard').style.display = 'block';
+      document.getElementById('user-name').textContent = user.nick || user.email;
+      loadDashboardData();
+    }
+
+    function logout() {
+      localStorage.removeItem('waline_token');
+      localStorage.removeItem('waline_user');
+      location.reload();
+    }
+
+    async function loadDashboardData() {
+      try {
+        const token = localStorage.getItem('waline_token');
+
+        // Load comments
+        const res = await fetch('/comment', {
+          headers: token ? { 'Authorization': 'Bearer ' + token } : {}
+        });
+        const data = await res.json();
+
+        if (data.errno === 0) {
+          const comments = data.data || [];
+          document.getElementById('total-comments').textContent = comments.length;
+
+          // Count today's comments
+          const today = new Date().toDateString();
+          const todayCount = comments.filter(c => {
+            const d = new Date(c.createdAt);
+            return !isNaN(d) && d.toDateString() === today;
+          }).length;
+          document.getElementById('today-comments').textContent = todayCount;
+
+          // Render comments
+          renderComments(comments.slice(0, 20));
+        }
+      } catch (err) {
+        console.error('Failed to load dashboard:', err);
+      }
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      return text.replace(/&/g, '&amp;')
+                 .replace(/</g, '&lt;')
+                 .replace(/>/g, '&gt;')
+                 .replace(/"/g, '&quot;')
+                 .replace(/'/g, '&#039;');
+    }
+
+    function renderComments(comments) {
+      const container = document.getElementById('comments-list');
+      if (comments.length === 0) {
+        container.innerHTML = '<div class="empty-state">暂无评论</div>';
+        return;
+      }
+
+      container.innerHTML = comments.map(c => '<div class="comment-item">' +
+        '<div class="comment-header">' +
+          '<span class="comment-author">' + escapeHtml(c.nick || '匿名') + '</span>' +
+          '<span class="comment-time">' + new Date(c.createdAt).toLocaleString() + '</span>' +
+        '</div>' +
+        '<div class="comment-content">' + escapeHtml(c.comment) + '</div>' +
+        '<div class="comment-actions">' +
+          '<button onclick="deleteComment(' + JSON.stringify(c.objectId || c.id) + ')">删除</button>' +
+        '</div>' +
+      '</div>').join('');
+    }
+
+    async function deleteComment(id) {
+      if (!confirm('确定要删除这条评论吗？')) return;
+
+      try {
+        const token = localStorage.getItem('waline_token');
+        const res = await fetch('/comment?id=' + id, {
+          method: 'DELETE',
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        const data = await res.json();
+
+        if (data.errno === 0) {
+          loadDashboardData();
+        } else {
+          alert('删除失败: ' + data.errmsg);
+        }
+      } catch (err) {
+        alert('删除失败: ' + err.message);
+      }
+    }
+
+    // Check if already logged in
+    const savedToken = localStorage.getItem('waline_token');
+    const savedUser = localStorage.getItem('waline_user');
+    if (savedToken && savedUser) {
+      try {
+        const user = JSON.parse(savedUser);
+        showDashboard(user);
+      } catch (e) {
+        localStorage.removeItem('waline_token');
+        localStorage.removeItem('waline_user');
+      }
+    }
   </script>
 </body>
 </html>`;

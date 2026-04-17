@@ -20,15 +20,17 @@ export default async function onRequest(context) {
     return match ? match[1] : null;
   };
 
-  // Helper: Verify JWT
+  // Helper: Verify JWT (signature verification requires crypto, simplified for now)
   const verifyJWT = async (token) => {
     try {
-      const [, payloadB64] = token.split('.');
-      if (!payloadB64) return null;
+      const [headerB64, payloadB64, signatureB64] = token.split('.');
+      if (!payloadB64 || !signatureB64) return null;
       const payload = JSON.parse(atob(payloadB64));
       if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
         return null;
       }
+      // Note: Full signature verification would require crypto.subtle.verify
+      // which needs the JWT secret. For now we trust the token if well-formed.
       return payload;
     } catch (e) {
       return null;
@@ -60,25 +62,30 @@ export default async function onRequest(context) {
         if (type === 'recent') {
           // Get recent comments
           const { keys } = await globalThis.WALINE_KV.list({ prefix: 'waline:comment:' });
-          const comments = [];
-          for (const key of keys) {
-            if (key.name.includes(':url:') || key.name.includes(':status:')) continue;
-            const data = await globalThis.WALINE_KV.get(key.name);
-            if (data) {
-              const c = JSON.parse(data);
-              if (c.status === 'approved' || !c.status) {
-                comments.push({
-                  objectId: c.objectId || c.id,
-                  comment: c.comment,
-                  nick: c.nick,
-                  url: c.url,
-                  createdAt: c.createdAt || c.insertedAt,
-                  avatar: c.avatar
-                });
-              }
-            }
-          }
-          comments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+          const commentPromises = keys
+            .filter(key => !key.name.includes(':url:') && !key.name.includes(':status:'))
+            .map(key => globalThis.WALINE_KV.get(key.name));
+          const commentData = await Promise.all(commentPromises);
+          const comments = commentData
+            .filter(data => data)
+            .map(data => JSON.parse(data))
+            .filter(c => c.status === 'approved' || !c.status)
+            .map(c => ({
+              objectId: c.objectId || c.id,
+              comment: c.comment,
+              nick: c.nick,
+              url: c.url,
+              createdAt: c.createdAt || c.insertedAt,
+              avatar: c.avatar,
+              link: c.link
+            }));
+          comments.sort((a, b) => {
+            const da = new Date(a.createdAt);
+            const db = new Date(b.createdAt);
+            if (isNaN(da)) return 1;
+            if (isNaN(db)) return -1;
+            return db - da;
+          });
           return new Response(JSON.stringify({ errno: 0, data: comments.slice(0, pageSize) }), {
             status: 200,
             headers: { 'Content-Type': 'application/json', ...corsHeaders }
@@ -94,17 +101,14 @@ export default async function onRequest(context) {
 
         // Get comments for a path
         const { keys } = await globalThis.WALINE_KV.list({ prefix: 'waline:comment:' });
-        const allComments = [];
-        for (const key of keys) {
-          if (key.name.includes(':url:') || key.name.includes(':status:')) continue;
-          const data = await globalThis.WALINE_KV.get(key.name);
-          if (data) {
-            const c = JSON.parse(data);
-            if (c.url === path) {
-              allComments.push(c);
-            }
-          }
-        }
+        const commentPromises = keys
+          .filter(key => !key.name.includes(':url:') && !key.name.includes(':status:'))
+          .map(key => globalThis.WALINE_KV.get(key.name));
+        const commentData = await Promise.all(commentPromises);
+        const allComments = commentData
+          .filter(data => data)
+          .map(data => JSON.parse(data))
+          .filter(c => c.url === path);
 
         // Filter based on user permissions
         let filtered = allComments;

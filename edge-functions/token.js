@@ -238,7 +238,7 @@ export default async function onRequest(context) {
           updatedAt: new Date().toISOString()
         };
 
-        await globalThis.WALINE_KV.put('user:' + user.objectId || user.id, JSON.stringify(updates));
+        await globalThis.WALINE_KV.put('user:' + (user.objectId || user.id), JSON.stringify(updates));
 
         return new Response(JSON.stringify({
           errno: 0,
