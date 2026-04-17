@@ -6,11 +6,11 @@
 
 export function adminUI(request) {
   const html = `<!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Waline Admin</title>
+  <title>Waline 管理后台</title>
   <style>
     /* CSS Variables */
     :root {
@@ -1151,7 +1151,7 @@ export function adminUI(request) {
       transform: translateX(24px);
     }
 
-    /* Import/Export */
+    /* 导入/导出 */
     .file-dropzone {
       border: 2px dashed var(--border);
       border-radius: 12px;
@@ -1193,18 +1193,23 @@ export function adminUI(request) {
   <!-- Login Page -->
   <div id="loginPage" class="login-page">
     <div class="login-box">
-      <h1>Waline Admin</h1>
-      <p class="subtitle">Sign in to manage your comments</p>
+      <h1>Waline 管理后台</h1>
+      <p class="subtitle">登录以管理评论</p>
+      <div style="background: #e3f2fd; border: 1px solid #2196f3; border-radius: 8px; padding: 12px; margin-bottom: 20px; font-size: 14px; color: #1565c0;">
+        <strong>首次使用？</strong><br>
+        第一个注册的用户将自动成为管理员。<br>
+        已有账号？请直接登录。
+      </div>
       <form id="loginForm">
         <div class="form-group">
-          <label for="loginEmail">Email</label>
-          <input type="email" id="loginEmail" placeholder="Enter your email" required>
+          <label for="loginEmail">邮箱</label>
+          <input type="email" id="loginEmail" placeholder="请输入邮箱" required>
         </div>
         <div class="form-group">
-          <label for="loginPassword">Password</label>
-          <input type="password" id="loginPassword" placeholder="Enter your password" required>
+          <label for="loginPassword">密码</label>
+          <input type="password" id="loginPassword" placeholder="请输入密码" required>
         </div>
-        <button type="submit" class="btn btn-primary btn-block">Sign In</button>
+        <button type="submit" class="btn btn-primary btn-block">登录</button>
       </form>
     </div>
   </div>
@@ -1220,23 +1225,23 @@ export function adminUI(request) {
       <nav class="sidebar-nav">
         <button class="nav-item active" data-page="dashboard">
           <span class="nav-icon">📊</span>
-          <span>Dashboard</span>
+          <span>概览</span>
         </button>
         <button class="nav-item" data-page="comments">
           <span class="nav-icon">💬</span>
-          <span>Comments</span>
+          <span>评论管理</span>
         </button>
         <button class="nav-item" data-page="users">
           <span class="nav-icon">👥</span>
-          <span>Users</span>
+          <span>用户管理</span>
         </button>
         <button class="nav-item" data-page="settings">
           <span class="nav-icon">⚙️</span>
-          <span>Settings</span>
+          <span>系统设置</span>
         </button>
         <button class="nav-item" data-page="data">
           <span class="nav-icon">📁</span>
-          <span>Data Management</span>
+          <span>数据管理</span>
         </button>
       </nav>
       <div class="sidebar-footer">
@@ -1256,11 +1261,11 @@ export function adminUI(request) {
       <header class="header">
         <div class="header-left">
           <button class="menu-toggle" id="menuToggle">☰</button>
-          <h1 class="header-title" id="pageTitle">Dashboard</h1>
+          <h1 class="header-title" id="pageTitle">概览</h1>
         </div>
         <div class="header-right">
           <button class="theme-toggle" id="themeToggle">🌙</button>
-          <button class="logout-btn" id="logoutBtn">Logout</button>
+          <button class="logout-btn" id="logoutBtn">退出登录</button>
         </div>
       </header>
 
@@ -1273,35 +1278,35 @@ export function adminUI(request) {
               <div class="stat-icon primary">💬</div>
               <div class="stat-content">
                 <div class="stat-value" id="statTotalComments">0</div>
-                <div class="stat-label">Total Comments</div>
+                <div class="stat-label">总评论数</div>
               </div>
             </div>
             <div class="stat-card">
               <div class="stat-icon warning">⏳</div>
               <div class="stat-content">
                 <div class="stat-value" id="statPendingComments">0</div>
-                <div class="stat-label">Pending Review</div>
+                <div class="stat-label">待审核</div>
               </div>
             </div>
             <div class="stat-card">
               <div class="stat-icon danger">🚫</div>
               <div class="stat-content">
                 <div class="stat-value" id="statSpamComments">0</div>
-                <div class="stat-label">Spam</div>
+                <div class="stat-label">垃圾评论</div>
               </div>
             </div>
             <div class="stat-card">
               <div class="stat-icon info">👥</div>
               <div class="stat-content">
                 <div class="stat-value" id="statTotalUsers">0</div>
-                <div class="stat-label">Total Users</div>
+                <div class="stat-label">总用户数</div>
               </div>
             </div>
           </div>
 
           <div class="card">
             <div class="card-header">
-              <h3 class="card-title">Recent Activity</h3>
+              <h3 class="card-title">最近活动</h3>
             </div>
             <div class="card-body">
               <div class="activity-list" id="recentActivity">
@@ -1314,29 +1319,29 @@ export function adminUI(request) {
         <!-- Comments Page -->
         <div id="commentsPage" class="page">
           <div class="bulk-bar" id="bulkBar">
-            <span><span id="selectedCount">0</span> selected</span>
+            <span>已选择 <span id="selectedCount">0</span> 项</span>
             <div class="bulk-actions">
-              <button class="btn btn-sm" onclick="bulkAction('approve')">Approve</button>
-              <button class="btn btn-sm" onclick="bulkAction('spam')">Mark Spam</button>
-              <button class="btn btn-sm" onclick="bulkAction('delete')">Delete</button>
+              <button class="btn btn-sm" onclick="bulkAction('approve')">通过</button>
+              <button class="btn btn-sm" onclick="bulkAction('spam')">标记垃圾</button>
+              <button class="btn btn-sm" onclick="bulkAction('delete')">删除</button>
             </div>
           </div>
 
           <div class="card">
             <div class="card-header">
-              <h3 class="card-title">Comments</h3>
+              <h3 class="card-title">评论列表</h3>
               <div class="toolbar">
                 <div class="search-box">
                   <span class="search-icon">🔍</span>
-                  <input type="text" id="commentSearch" placeholder="Search comments...">
+                  <input type="text" id="commentSearch" placeholder="搜索评论...">
                 </div>
                 <select class="filter-select" id="commentFilter">
-                  <option value="">All Status</option>
-                  <option value="approved">Approved</option>
-                  <option value="waiting">Waiting</option>
-                  <option value="spam">Spam</option>
+                  <option value="">全部状态</option>
+                  <option value="approved">已通过</option>
+                  <option value="waiting">待审核</option>
+                  <option value="spam">垃圾评论</option>
                 </select>
-                <button class="btn btn-primary btn-sm" onclick="refreshComments()">🔄 Refresh</button>
+                <button class="btn btn-primary btn-sm" onclick="refreshComments()">🔄 刷新</button>
               </div>
             </div>
             <div class="card-body">
@@ -1347,11 +1352,11 @@ export function adminUI(request) {
                       <th class="checkbox-col">
                         <input type="checkbox" id="selectAll">
                       </th>
-                      <th>Author</th>
-                      <th>Comment</th>
-                      <th>Status</th>
-                      <th>Date</th>
-                      <th>Actions</th>
+                      <th>作者</th>
+                      <th>评论内容</th>
+                      <th>状态</th>
+                      <th>时间</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody id="commentsTable">
@@ -1361,7 +1366,7 @@ export function adminUI(request) {
               </div>
               <div class="pagination">
                 <div class="pagination-info">
-                  Showing <span id="showingFrom">0</span>-<span id="showingTo">0</span> of <span id="totalItems">0</span>
+                  显示 <span id="showingFrom">0</span>-<span id="showingTo">0</span> 条，共 <span id="totalItems">0</span> 条
                 </div>
                 <div class="pagination-controls" id="paginationControls">
                   <!-- Pagination buttons will be generated here -->
@@ -1375,13 +1380,13 @@ export function adminUI(request) {
         <div id="usersPage" class="page">
           <div class="card">
             <div class="card-header">
-              <h3 class="card-title">Users</h3>
+              <h3 class="card-title">用户列表</h3>
               <div class="toolbar">
                 <div class="search-box">
                   <span class="search-icon">🔍</span>
-                  <input type="text" id="userSearch" placeholder="Search users...">
+                  <input type="text" id="userSearch" placeholder="搜索用户...">
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="refreshUsers()">🔄 Refresh</button>
+                <button class="btn btn-primary btn-sm" onclick="refreshUsers()">🔄 刷新</button>
               </div>
             </div>
             <div class="card-body">
@@ -1389,11 +1394,11 @@ export function adminUI(request) {
                 <table>
                   <thead>
                     <tr>
-                      <th>User</th>
-                      <th>Role</th>
-                      <th>Comments</th>
-                      <th>Joined</th>
-                      <th>Actions</th>
+                      <th>用户</th>
+                      <th>角色</th>
+                      <th>评论数</th>
+                      <th>注册时间</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody id="usersTable">
@@ -1403,7 +1408,7 @@ export function adminUI(request) {
               </div>
               <div class="pagination">
                 <div class="pagination-info">
-                  Showing <span id="usersShowingFrom">0</span>-<span id="usersShowingTo">0</span> of <span id="usersTotalItems">0</span>
+                  显示 <span id="usersShowingFrom">0</span>-<span id="usersShowingTo">0</span> 条，共 <span id="usersTotalItems">0</span> 条
                 </div>
                 <div class="pagination-controls" id="usersPaginationControls">
                   <!-- Pagination buttons will be generated here -->
@@ -1416,66 +1421,66 @@ export function adminUI(request) {
         <!-- Settings Page -->
         <div id="settingsPage" class="page">
           <div class="settings-tabs">
-            <button class="settings-tab active" data-tab="site">Site</button>
-            <button class="settings-tab" data-tab="notification">Notification</button>
-            <button class="settings-tab" data-tab="security">Security</button>
+            <button class="settings-tab active" data-tab="site">站点设置</button>
+            <button class="settings-tab" data-tab="notification">邮件通知</button>
+            <button class="settings-tab" data-tab="security">安全设置</button>
           </div>
 
           <!-- Site Settings -->
           <div id="siteSettings" class="settings-panel active">
             <div class="card">
               <div class="card-header">
-                <h3 class="card-title">Site Configuration</h3>
+                <h3 class="card-title">站点配置</h3>
               </div>
               <div class="card-body">
                 <form id="siteSettingsForm">
                   <div class="form-row">
                     <div class="form-group">
-                      <label for="siteName">Site Name</label>
-                      <input type="text" id="siteName" placeholder="My Blog">
+                      <label for="siteName">站点名称</label>
+                      <input type="text" id="siteName" placeholder="我的博客">
                     </div>
                     <div class="form-group">
-                      <label for="siteUrl">Site URL</label>
+                      <label for="siteUrl">站点地址</label>
                       <input type="url" id="siteUrl" placeholder="https://example.com">
                     </div>
                   </div>
                   <div class="form-group">
-                    <label for="siteDescription">Description</label>
-                    <textarea id="siteDescription" rows="3" placeholder="Site description..."></textarea>
+                    <label for="siteDescription">站点描述</label>
+                    <textarea id="siteDescription" rows="3" placeholder="站点描述..."></textarea>
                   </div>
                   <div class="form-row">
                     <div class="form-group">
-                      <label for="defaultAvatar">Default Avatar</label>
+                      <label for="defaultAvatar">默认头像</label>
                       <select id="defaultAvatar">
-                        <option value="identicon">Identicon</option>
-                        <option value="mp">Mystery Person</option>
-                        <option value="monsterid">Monster ID</option>
+                        <option value="identicon">几何图案</option>
+                        <option value="mp">神秘人</option>
+                        <option value="monsterid">怪物</option>
                         <option value="wavatar">Wavatar</option>
-                        <option value="retro">Retro</option>
-                        <option value="robohash">Robohash</option>
+                        <option value="retro">复古</option>
+                        <option value="robohash">机器人</option>
                       </select>
                     </div>
                     <div class="form-group">
-                      <label for="commentOrder">Comment Order</label>
+                      <label for="commentOrder">评论排序</label>
                       <select id="commentOrder">
-                        <option value="newest">Newest First</option>
-                        <option value="oldest">Oldest First</option>
+                        <option value="newest">最新优先</option>
+                        <option value="oldest">最早优先</option>
                       </select>
                     </div>
                   </div>
                   <div class="form-group">
                     <label class="form-check">
                       <input type="checkbox" id="requireApproval">
-                      <span>Require approval for new comments</span>
+                      <span>新评论需要审核</span>
                     </label>
                   </div>
                   <div class="form-group">
                     <label class="form-check">
                       <input type="checkbox" id="allowAnonymous">
-                      <span>Allow anonymous comments</span>
+                      <span>允许匿名评论</span>
                     </label>
                   </div>
-                  <button type="submit" class="btn btn-primary">Save Changes</button>
+                  <button type="submit" class="btn btn-primary">保存设置</button>
                 </form>
               </div>
             </div>
@@ -1485,56 +1490,56 @@ export function adminUI(request) {
           <div id="notificationSettings" class="settings-panel">
             <div class="card">
               <div class="card-header">
-                <h3 class="card-title">Notification Settings</h3>
+                <h3 class="card-title">邮件通知设置</h3>
               </div>
               <div class="card-body">
                 <form id="notificationSettingsForm">
                   <div class="form-group">
                     <label class="form-check">
                       <input type="checkbox" id="notifyNewComment">
-                      <span>Notify on new comments</span>
+                      <span>新评论时通知管理员</span>
                     </label>
                   </div>
                   <div class="form-group">
                     <label class="form-check">
                       <input type="checkbox" id="notifyReply">
-                      <span>Notify users on reply</span>
+                      <span>回复时通知用户</span>
                     </label>
                   </div>
                   <div class="form-group">
-                    <label for="adminEmail">Admin Email</label>
+                    <label for="adminEmail">管理员邮箱</label>
                     <input type="email" id="adminEmail" placeholder="admin@example.com">
-                    <p class="form-hint">Email address to receive notifications</p>
+                    <p class="form-hint">接收通知的邮箱地址</p>
                   </div>
                   <div class="form-group">
-                    <label for="smtpHost">SMTP Host</label>
+                    <label for="smtpHost">SMTP 服务器</label>
                     <input type="text" id="smtpHost" placeholder="smtp.example.com">
                   </div>
                   <div class="form-row">
                     <div class="form-group">
-                      <label for="smtpPort">SMTP Port</label>
+                      <label for="smtpPort">SMTP 端口</label>
                       <input type="number" id="smtpPort" placeholder="587">
                     </div>
                     <div class="form-group">
-                      <label for="smtpSecure">Security</label>
+                      <label for="smtpSecure">安全类型</label>
                       <select id="smtpSecure">
                         <option value="tls">TLS</option>
                         <option value="ssl">SSL</option>
-                        <option value="none">None</option>
+                        <option value="none">无</option>
                       </select>
                     </div>
                   </div>
                   <div class="form-row">
                     <div class="form-group">
-                      <label for="smtpUser">SMTP Username</label>
-                      <input type="text" id="smtpUser" placeholder="username">
+                      <label for="smtpUser">SMTP 用户名</label>
+                      <input type="text" id="smtpUser" placeholder="用户名">
                     </div>
                     <div class="form-group">
-                      <label for="smtpPass">SMTP Password</label>
+                      <label for="smtpPass">SMTP 密码</label>
                       <input type="password" id="smtpPass" placeholder="••••••••">
                     </div>
                   </div>
-                  <button type="submit" class="btn btn-primary">Save Changes</button>
+                  <button type="submit" class="btn btn-primary">保存设置</button>
                 </form>
               </div>
             </div>
@@ -1544,41 +1549,41 @@ export function adminUI(request) {
           <div id="securitySettings" class="settings-panel">
             <div class="card">
               <div class="card-header">
-                <h3 class="card-title">Security Settings</h3>
+                <h3 class="card-title">安全设置</h3>
               </div>
               <div class="card-body">
                 <form id="securitySettingsForm">
                   <div class="form-group">
                     <label class="form-check">
                       <input type="checkbox" id="enableCaptcha">
-                      <span>Enable CAPTCHA</span>
+                      <span>启用验证码</span>
                     </label>
                   </div>
                   <div class="form-group">
                     <label class="form-check">
                       <input type="checkbox" id="enableAkismet">
-                      <span>Enable Akismet spam detection</span>
+                      <span>启用 Akismet 垃圾评论检测</span>
                     </label>
                   </div>
                   <div class="form-group">
                     <label for="akismetKey">Akismet API Key</label>
-                    <input type="text" id="akismetKey" placeholder="Your Akismet API key">
+                    <input type="text" id="akismetKey" placeholder="你的 Akismet API 密钥">
                   </div>
                   <div class="form-group">
-                    <label for="wordFilter">Word Filter</label>
-                    <textarea id="wordFilter" rows="3" placeholder="spam, badword, anotherword"></textarea>
-                    <p class="form-hint">Comma-separated list of words to filter</p>
+                    <label for="wordFilter">关键词过滤</label>
+                    <textarea id="wordFilter" rows="3" placeholder="垃圾, 广告, 敏感词"></textarea>
+                    <p class="form-hint">用逗号分隔要过滤的关键词</p>
                   </div>
                   <div class="form-group">
-                    <label for="ipBlacklist">IP Blacklist</label>
+                    <label for="ipBlacklist">IP 黑名单</label>
                     <textarea id="ipBlacklist" rows="3" placeholder="192.168.1.1, 10.0.0.1"></textarea>
-                    <p class="form-hint">Comma-separated list of blocked IP addresses</p>
+                    <p class="form-hint">用逗号分隔要屏蔽的 IP 地址</p>
                   </div>
                   <div class="form-group">
-                    <label for="maxLinks">Max Links Per Comment</label>
+                    <label for="maxLinks">每条评论最大链接数</label>
                     <input type="number" id="maxLinks" value="3" min="0">
                   </div>
-                  <button type="submit" class="btn btn-primary">Save Changes</button>
+                  <button type="submit" class="btn btn-primary">保存设置</button>
                 </form>
               </div>
             </div>
@@ -1589,28 +1594,28 @@ export function adminUI(request) {
         <div id="dataPage" class="page">
           <div class="card">
             <div class="card-header">
-              <h3 class="card-title">Export Data</h3>
+              <h3 class="card-title">导出数据</h3>
             </div>
             <div class="card-body">
-              <p style="margin-bottom: 20px; color: var(--text-light);">Export all your comments and user data in JSON format.</p>
+              <p style="margin-bottom: 20px; color: var(--text-light);">以 JSON 格式导出所有评论和用户数据。</p>
               <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                <button class="btn btn-primary" onclick="exportData('comments')">Export Comments</button>
-                <button class="btn btn-primary" onclick="exportData('users')">Export Users</button>
-                <button class="btn btn-secondary" onclick="exportData('all')">Export All Data</button>
+                <button class="btn btn-primary" onclick="exportData('comments')">导出评论</button>
+                <button class="btn btn-primary" onclick="exportData('users')">导出用户</button>
+                <button class="btn btn-secondary" onclick="exportData('all')">导出全部</button>
               </div>
             </div>
           </div>
 
           <div class="card">
             <div class="card-header">
-              <h3 class="card-title">Import Data</h3>
+              <h3 class="card-title">导入数据</h3>
             </div>
             <div class="card-body">
-              <p style="margin-bottom: 20px; color: var(--text-light);">Import comments and user data from a JSON file.</p>
+              <p style="margin-bottom: 20px; color: var(--text-light);">从 JSON 文件导入评论和用户数据。</p>
               <div class="file-dropzone" id="importDropzone">
                 <div class="file-dropzone-icon">📁</div>
-                <div class="file-dropzone-text">Drop JSON file here or click to browse</div>
-                <div class="file-dropzone-hint">Supports Waline JSON export format</div>
+                <div class="file-dropzone-text">拖放 JSON 文件到此处或点击浏览</div>
+                <div class="file-dropzone-hint">支持 Waline JSON 导出格式</div>
                 <input type="file" id="importFile" accept=".json" style="display: none;">
               </div>
             </div>
@@ -1618,23 +1623,23 @@ export function adminUI(request) {
 
           <div class="card">
             <div class="card-header">
-              <h3 class="card-title">Danger Zone</h3>
+              <h3 class="card-title">危险区域</h3>
             </div>
             <div class="card-body">
               <div style="display: flex; flex-direction: column; gap: 16px;">
                 <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px; background: rgba(231, 76, 60, 0.05); border-radius: 8px; border: 1px solid rgba(231, 76, 60, 0.2);">
                   <div>
-                    <div style="font-weight: 600; margin-bottom: 4px;">Clear All Comments</div>
-                    <div style="font-size: 14px; color: var(--text-light);">Permanently delete all comments. This action cannot be undone.</div>
+                    <div style="font-weight: 600; margin-bottom: 4px;">清空所有评论</div>
+                    <div style="font-size: 14px; color: var(--text-light);">永久删除所有评论，此操作不可撤销。</div>
                   </div>
-                  <button class="btn btn-danger" onclick="confirmClearData('comments')">Clear Comments</button>
+                  <button class="btn btn-danger" onclick="confirmClearData('comments')">清空评论</button>
                 </div>
                 <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px; background: rgba(231, 76, 60, 0.05); border-radius: 8px; border: 1px solid rgba(231, 76, 60, 0.2);">
                   <div>
-                    <div style="font-weight: 600; margin-bottom: 4px;">Clear All Data</div>
-                    <div style="font-size: 14px; color: var(--text-light);">Permanently delete all comments and users. This action cannot be undone.</div>
+                    <div style="font-weight: 600; margin-bottom: 4px;">清空所有数据</div>
+                    <div style="font-size: 14px; color: var(--text-light);">永久删除所有评论和用户，此操作不可撤销。</div>
                   </div>
-                  <button class="btn btn-danger" onclick="confirmClearData('all')">Clear All</button>
+                  <button class="btn btn-danger" onclick="confirmClearData('all')">清空全部</button>
                 </div>
               </div>
             </div>
@@ -1648,41 +1653,41 @@ export function adminUI(request) {
   <div class="modal-overlay" id="editCommentModal">
     <div class="modal">
       <div class="modal-header">
-        <h3 class="modal-title">Edit Comment</h3>
+        <h3 class="modal-title">编辑评论</h3>
         <button class="modal-close" onclick="closeModal('editCommentModal')">&times;</button>
       </div>
       <div class="modal-body">
         <form id="editCommentForm">
           <input type="hidden" id="editCommentId">
           <div class="form-group">
-            <label for="editCommentNick">Nickname</label>
+            <label for="editCommentNick">昵称</label>
             <input type="text" id="editCommentNick">
           </div>
           <div class="form-group">
-            <label for="editCommentMail">Email</label>
+            <label for="editCommentMail">邮箱</label>
             <input type="email" id="editCommentMail">
           </div>
           <div class="form-group">
-            <label for="editCommentLink">Website</label>
+            <label for="editCommentLink">网站</label>
             <input type="url" id="editCommentLink">
           </div>
           <div class="form-group">
-            <label for="editCommentContent">Content</label>
+            <label for="editCommentContent">内容</label>
             <textarea id="editCommentContent" rows="5"></textarea>
           </div>
           <div class="form-group">
-            <label for="editCommentStatus">Status</label>
+            <label for="editCommentStatus">状态</label>
             <select id="editCommentStatus">
-              <option value="approved">Approved</option>
-              <option value="waiting">Waiting</option>
-              <option value="spam">Spam</option>
+              <option value="approved">已通过</option>
+              <option value="waiting">待审核</option>
+              <option value="spam">垃圾评论</option>
             </select>
           </div>
         </form>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('editCommentModal')">Cancel</button>
-        <button class="btn btn-primary" onclick="saveComment()">Save Changes</button>
+        <button class="btn btn-secondary" onclick="closeModal('editCommentModal')">取消</button>
+        <button class="btn btn-primary" onclick="saveComment()">保存修改</button>
       </div>
     </div>
   </div>
@@ -1691,37 +1696,37 @@ export function adminUI(request) {
   <div class="modal-overlay" id="editUserModal">
     <div class="modal">
       <div class="modal-header">
-        <h3 class="modal-title">Edit User</h3>
+        <h3 class="modal-title">编辑用户</h3>
         <button class="modal-close" onclick="closeModal('editUserModal')">&times;</button>
       </div>
       <div class="modal-body">
         <form id="editUserForm">
           <input type="hidden" id="editUserId">
           <div class="form-group">
-            <label for="editUserDisplayName">Display Name</label>
+            <label for="editUserDisplayName">显示名称</label>
             <input type="text" id="editUserDisplayName">
           </div>
           <div class="form-group">
-            <label for="editUserEmail">Email</label>
+            <label for="editUserEmail">邮箱</label>
             <input type="email" id="editUserEmail">
           </div>
           <div class="form-group">
-            <label for="editUserRole">Role</label>
+            <label for="editUserRole">角色</label>
             <select id="editUserRole">
-              <option value="administrator">Administrator</option>
-              <option value="moderator">Moderator</option>
-              <option value="user">User</option>
+              <option value="administrator">管理员</option>
+              <option value="moderator">版主</option>
+              <option value="user">普通用户</option>
             </select>
           </div>
           <div class="form-group">
-            <label for="editUserUrl">Website</label>
+            <label for="editUserUrl">网站</label>
             <input type="url" id="editUserUrl">
           </div>
         </form>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('editUserModal')">Cancel</button>
-        <button class="btn btn-primary" onclick="saveUser()">Save Changes</button>
+        <button class="btn btn-secondary" onclick="closeModal('editUserModal')">取消</button>
+        <button class="btn btn-primary" onclick="saveUser()">保存修改</button>
       </div>
     </div>
   </div>
@@ -1948,7 +1953,7 @@ export function adminUI(request) {
           localStorage.setItem('waline_user', JSON.stringify(state.user));
           showAdmin();
           loadDashboard();
-          showToast('Welcome back!', 'success');
+          showToast('欢迎回来！', 'success');
         }
       } catch (error) {
         // Error handled by api client
@@ -1991,11 +1996,11 @@ export function adminUI(request) {
       
       // Update page title
       const titles = {
-        dashboard: 'Dashboard',
-        comments: 'Comments',
-        users: 'Users',
-        settings: 'Settings',
-        data: 'Data Management'
+        dashboard: '概览',
+        comments: '评论管理',
+        users: '用户管理',
+        settings: '系统设置',
+        data: '数据管理'
       };
       document.getElementById('pageTitle').textContent = titles[page];
       
@@ -2042,7 +2047,7 @@ export function adminUI(request) {
       const container = document.getElementById('recentActivity');
       
       if (comments.length === 0) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-title">No recent activity</div></div>';
+        container.innerHTML = '<div class="empty-state"><div class="empty-title">暂无最近活动</div></div>';
         return;
       }
       
@@ -2059,7 +2064,7 @@ export function adminUI(request) {
             <div class="activity-icon \${iconClass}">\${icons[iconClass]}</div>
             <div class="activity-content">
               <div class="activity-text">
-                <strong>\${escapeHtml(comment.nick)}</strong> commented on <a href="\${comment.url}" class="comment-page" target="_blank">\${escapeHtml(comment.url)}</a>
+                <strong>\${escapeHtml(comment.nick)}</strong> 评论了 <a href="\${comment.url}" class="comment-page" target="_blank">\${escapeHtml(comment.url)}</a>
               </div>
               <div class="activity-time">\${formatDate(comment.createdAt)}</div>
             </div>
@@ -2105,8 +2110,8 @@ export function adminUI(request) {
             <td colspan="6">
               <div class="empty-state">
                 <div class="empty-icon">💬</div>
-                <div class="empty-title">No comments found</div>
-                <div class="empty-desc">Try adjusting your filters or search</div>
+                <div class="empty-title">暂无评论</div>
+                <div class="empty-desc">尝试调整筛选条件或搜索关键词</div>
               </div>
             </td>
           </tr>
@@ -2116,9 +2121,9 @@ export function adminUI(request) {
       
       tbody.innerHTML = comments.map(comment => {
         const statusBadges = {
-          approved: '<span class="badge badge-approved">● Approved</span>',
-          waiting: '<span class="badge badge-waiting">● Waiting</span>',
-          spam: '<span class="badge badge-spam">● Spam</span>'
+          approved: '<span class="badge badge-approved">● 已通过</span>',
+          waiting: '<span class="badge badge-waiting">● 待审核</span>',
+          spam: '<span class="badge badge-spam">● 垃圾评论</span>'
         };
         
         return \`
@@ -2145,10 +2150,10 @@ export function adminUI(request) {
             <td>\${formatDate(comment.createdAt)}</td>
             <td>
               <div class="actions">
-                <button class="action-btn" onclick="editComment('\${comment.objectId}')" title="Edit">✏️</button>
-                <button class="action-btn" onclick="approveComment('\${comment.objectId}')" title="Approve">✅</button>
-                <button class="action-btn" onclick="spamComment('\${comment.objectId}')" title="Mark as Spam">🚫</button>
-                <button class="action-btn danger" onclick="deleteComment('\${comment.objectId}')" title="Delete">🗑️</button>
+                <button class="action-btn" onclick="editComment('\${comment.objectId}')" title="编辑">✏️</button>
+                <button class="action-btn" onclick="approveComment('\${comment.objectId}')" title="通过">✅</button>
+                <button class="action-btn" onclick="spamComment('\${comment.objectId}')" title="标记垃圾">🚫</button>
+                <button class="action-btn danger" onclick="deleteComment('\${comment.objectId}')" title="删除">🗑️</button>
               </div>
             </td>
           </tr>
@@ -2226,7 +2231,7 @@ export function adminUI(request) {
         state.selectedComments.clear();
         updateBulkBar();
         loadComments();
-        showToast(\`\${ids.length} comments \${action === 'delete' ? 'deleted' : 'updated'}\`, 'success');
+        showToast(\`\${ids.length} 条评论已\${action === 'delete' ? '删除' : '更新'}\`, 'success');
       } catch (error) {
         console.error('Bulk action failed:', error);
       }
@@ -2260,7 +2265,7 @@ export function adminUI(request) {
         await api.updateComment(id, data);
         closeModal('editCommentModal');
         loadComments();
-        showToast('Comment updated successfully', 'success');
+        showToast('评论更新成功', 'success');
       } catch (error) {
         console.error('Failed to update comment:', error);
       }
@@ -2270,7 +2275,7 @@ export function adminUI(request) {
       try {
         await api.updateComment(id, { status: 'approved' });
         loadComments();
-        showToast('Comment approved', 'success');
+        showToast('评论已通过', 'success');
       } catch (error) {
         console.error('Failed to approve comment:', error);
       }
@@ -2280,19 +2285,19 @@ export function adminUI(request) {
       try {
         await api.updateComment(id, { status: 'spam' });
         loadComments();
-        showToast('Comment marked as spam', 'success');
+        showToast('评论已标记为垃圾', 'success');
       } catch (error) {
         console.error('Failed to mark comment as spam:', error);
       }
     }
 
     async function deleteComment(id) {
-      if (!confirm('Are you sure you want to delete this comment?')) return;
+      if (!confirm('确定要删除这条评论吗？')) return;
       
       try {
         await api.deleteComment(id);
         loadComments();
-        showToast('Comment deleted', 'success');
+        showToast('评论已删除', 'success');
       } catch (error) {
         console.error('Failed to delete comment:', error);
       }
@@ -2335,8 +2340,8 @@ export function adminUI(request) {
             <td colspan="5">
               <div class="empty-state">
                 <div class="empty-icon">👥</div>
-                <div class="empty-title">No users found</div>
-                <div class="empty-desc">Try adjusting your search</div>
+                <div class="empty-title">暂无用户</div>
+                <div class="empty-desc">尝试调整搜索关键词</div>
               </div>
             </td>
           </tr>
@@ -2346,9 +2351,9 @@ export function adminUI(request) {
       
       tbody.innerHTML = users.map(user => {
         const roleBadges = {
-          administrator: '<span class="badge badge-admin">Admin</span>',
-          moderator: '<span class="badge badge-info">Moderator</span>',
-          user: '<span class="badge badge-user">User</span>'
+          administrator: '<span class="badge badge-admin">管理员</span>',
+          moderator: '<span class="badge badge-info">版主</span>',
+          user: '<span class="badge badge-user">用户</span>'
         };
         
         return \`
@@ -2367,8 +2372,8 @@ export function adminUI(request) {
             <td>\${formatDate(user.createdAt)}</td>
             <td>
               <div class="actions">
-                <button class="action-btn" onclick="editUser('\${user.objectId}')" title="Edit">✏️</button>
-                <button class="action-btn danger" onclick="deleteUser('\${user.objectId}')" title="Delete">🗑️</button>
+                <button class="action-btn" onclick="editUser('\${user.objectId}')" title="编辑">✏️</button>
+                <button class="action-btn danger" onclick="deleteUser('\${user.objectId}')" title="删除">🗑️</button>
               </div>
             </td>
           </tr>
@@ -2408,19 +2413,19 @@ export function adminUI(request) {
         await api.updateUser(id, data);
         closeModal('editUserModal');
         loadUsers();
-        showToast('User updated successfully', 'success');
+        showToast('用户更新成功', 'success');
       } catch (error) {
         console.error('Failed to update user:', error);
       }
     }
 
     async function deleteUser(id) {
-      if (!confirm('Are you sure you want to delete this user? All their comments will also be deleted.')) return;
+      if (!confirm('确定要删除这个用户吗？该用户的所有评论也将被删除。')) return;
       
       try {
         await api.deleteUser(id);
         loadUsers();
-        showToast('User deleted', 'success');
+        showToast('用户已删除', 'success');
       } catch (error) {
         console.error('Failed to delete user:', error);
       }
@@ -2519,7 +2524,7 @@ export function adminUI(request) {
     async function saveSettings(data) {
       try {
         await api.updateSettings(data);
-        showToast('Settings saved successfully', 'success');
+        showToast('设置保存成功', 'success');
       } catch (error) {
         console.error('Failed to save settings:', error);
       }
@@ -2553,10 +2558,10 @@ export function adminUI(request) {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
-        showToast('Data exported successfully', 'success');
+        showToast('数据导出成功', 'success');
       } catch (error) {
         console.error('Export failed:', error);
-        showToast('Export failed', 'error');
+        showToast('导出失败', 'error');
       }
     }
 
@@ -2567,7 +2572,7 @@ export function adminUI(request) {
         const text = await file.text();
         const data = JSON.parse(text);
         
-        if (!confirm(\`Import \${data.comments?.length || 0} comments and \${data.users?.length || 0} users?\`)) {
+        if (!confirm(\`导入 \${data.comments?.length || 0} 条评论和 \${data.users?.length || 0} 个用户？\`)) {
           return;
         }
         
@@ -2593,21 +2598,21 @@ export function adminUI(request) {
           }
         }
         
-        showToast('Data imported successfully', 'success');
+        showToast('数据导入成功', 'success');
         loadDashboard();
       } catch (error) {
         console.error('Import failed:', error);
-        showToast('Import failed: ' + error.message, 'error');
+        showToast('导入失败：' + error.message, 'error');
       }
     }
 
     async function confirmClearData(type) {
       const message = type === 'all' 
-        ? 'Are you sure you want to delete ALL data? This cannot be undone!'
-        : 'Are you sure you want to delete all comments? This cannot be undone!';
+        ? '确定要删除所有数据吗？此操作不可撤销！'
+        : '确定要删除所有评论吗？此操作不可撤销！';
       
       if (!confirm(message)) return;
-      if (!confirm('This is your last chance. Really delete everything?')) return;
+      if (!confirm('这是最后一次确认，真的要全部删除吗？')) return;
       
       try {
         if (type === 'comments' || type === 'all') {
@@ -2626,11 +2631,11 @@ export function adminUI(request) {
           }
         }
         
-        showToast('Data cleared successfully', 'success');
+        showToast('数据清空成功', 'success');
         loadDashboard();
       } catch (error) {
         console.error('Clear data failed:', error);
-        showToast('Failed to clear data', 'error');
+        showToast('清空数据失败', 'error');
       }
     }
 
@@ -2749,24 +2754,24 @@ export function adminUI(request) {
     }
 
     function formatDate(dateString) {
-      if (!dateString) return 'Unknown';
+      if (!dateString) return '未知';
       const date = new Date(dateString);
       const now = new Date();
       const diff = now - date;
       
       // Less than 1 minute
-      if (diff < 60000) return 'Just now';
+      if (diff < 60000) return '刚刚';
       
       // Less than 1 hour
-      if (diff < 3600000) return \`\${Math.floor(diff / 60000)}m ago\`;
+      if (diff < 3600000) return \`\${Math.floor(diff / 60000)} 分钟前\`;
       
       // Less than 24 hours
-      if (diff < 86400000) return \`\${Math.floor(diff / 3600000)}h ago\`;
+      if (diff < 86400000) return \`\${Math.floor(diff / 3600000)} 小时前\`;
       
       // Less than 7 days
-      if (diff < 604800000) return \`\${Math.floor(diff / 86400000)}d ago\`;
+      if (diff < 604800000) return \`\${Math.floor(diff / 86400000)} 天前\`;
       
-      return date.toLocaleDateString();
+      return date.toLocaleDateString('zh-CN');
     }
 
     // Close modals on overlay click

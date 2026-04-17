@@ -770,6 +770,10 @@ export class UserAPI {
         verificationToken = EmailUtils.generateVerificationToken();
       }
 
+      // Check if this is the first user (will be admin)
+      const userCount = await this.db.count('user');
+      const isFirstUser = userCount === 0;
+
       // Create user
       const userId = CryptoUtils.randomBytesHex(16);
       const user = {
@@ -780,8 +784,8 @@ export class UserAPI {
         nick: nick || email.split('@')[0],
         url: url || '',
         avatar: avatar || '',
-        type: UserType.USER,
-        role: UserRole.USER,
+        type: isFirstUser ? UserType.ADMINISTRATOR : UserType.USER,
+        role: isFirstUser ? UserRole.ADMIN : UserRole.USER,
         emailVerified: !this.email.requireVerification,
         verificationToken: verificationToken,
         twoFAEnabled: false,
