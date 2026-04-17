@@ -558,12 +558,21 @@ export class UserAPI {
    */
 
   /**
-   * GET /user - Get current user info
+   * GET /user - Get current user info or user list
    * @param {Request} request - HTTP request
-   * @returns {Response} User info response
+   * @returns {Response} User info or list response
    */
   async getUser(request) {
     try {
+      const url = new URL(request.url);
+      const type = url.searchParams.get('type');
+
+      // Get user list
+      if (type === 'list') {
+        return this.getUserList(request);
+      }
+
+      // Get current user
       const user = await this.getCurrentUser(request);
 
       if (!user) {
@@ -575,6 +584,41 @@ export class UserAPI {
 
       return new Response(
         JSON.stringify(this.createResponse(user)),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    } catch (error) {
+      return new Response(
+        JSON.stringify(this.createError(error.message, 500)),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+  }
+
+  /**
+   * GET /user?type=list - Get user list/leaderboard
+   * @param {Request} request - HTTP request
+   * @returns {Response} User list response
+   */
+  async getUserList(request) {
+    try {
+      const url = new URL(request.url);
+      const pageSize = Math.min(100, parseInt(url.searchParams.get('pageSize')) || 10);
+      const lang = url.searchParams.get('lang') || 'zh-CN';
+
+      // Get all users with comment counts
+      const users = await this.db.query('user', {});
+
+      // Sort by comment count (descending)
+      const sortedUsers = users
+        .map(u => ({
+          ...this.sanitizeUser(u),
+          commentCount: u.commentCount || 0
+        }))
+        .sort((a, b) => b.commentCount - a.commentCount)
+        .slice(0, pageSize);
+
+      return new Response(
+        JSON.stringify(this.createResponse(sortedUsers)),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       );
     } catch (error) {

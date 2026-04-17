@@ -5,6 +5,7 @@ import { WalineKV } from '../src/kv.js';
 import { CommentAPI } from '../src/api/comment.js';
 import { UserAPI } from '../src/api/user.js';
 import { AdminAPI } from '../src/api/admin.js';
+import { ReactionAPI } from '../src/api/reaction.js';
 import { notify } from '../src/service/notify.js';
 import { MarkdownService } from '../src/service/markdown-simple.js';
 import { checkSpam } from '../src/service/akismet.js';
@@ -37,6 +38,11 @@ const getConfig = (env) => ({
   ipQPS: parseInt(env.IP_QPS) || 60,
   likeIncMax: parseInt(env.LIKE_INC_MAX) || 10,
   oauthUrl: env.OAUTH_URL || 'https://oauth.lithub.cc',
+  login: env.LOGIN || '', // 'force' to require login
+  recaptchaV3Key: env.RECAPTCHA_V3_KEY,
+  recaptchaV3Secret: env.RECAPTCHA_V3_SECRET,
+  turnstileKey: env.TURNSTILE_KEY,
+  turnstileSecret: env.TURNSTILE_SECRET,
   smtp: {
     host: env.SMTP_HOST,
     port: parseInt(env.SMTP_PORT) || 465,
@@ -93,6 +99,7 @@ export async function onRequest(context) {
   const commentAPI = new CommentAPI(db, config, markdown, notifyService, akismetService, avatarService);
   const userAPI = new UserAPI(db, config, notifyService);
   const adminAPI = new AdminAPI(db, config);
+  const reactionAPI = new ReactionAPI({ storage: db, config });
 
   // Build context
   const ctx = {
@@ -134,7 +141,7 @@ export async function onRequest(context) {
     }
 
     // Execute handler
-    const result = await route.handler(ctx, { commentAPI, userAPI, adminAPI });
+    const result = await route.handler(ctx, { commentAPI, userAPI, adminAPI, reactionAPI });
 
     if (result instanceof Response) {
       return result;
@@ -166,12 +173,16 @@ function matchRoute(path, method) {
     
     // User APIs
     { path: '/user', method: 'GET', handler: async (ctx, apis) => apis.userAPI.get(ctx) },
+    { path: '/user', method: 'PUT', handler: async (ctx, apis) => apis.userAPI.updateProfile(ctx) },
     { path: '/login', method: 'POST', handler: async (ctx, apis) => apis.userAPI.login(ctx) },
     { path: '/register', method: 'POST', handler: async (ctx, apis) => apis.userAPI.register(ctx) },
     { path: '/token', method: 'POST', handler: async (ctx, apis) => apis.userAPI.refreshToken(ctx) },
+    { path: '/token', method: 'PUT', handler: async (ctx, apis) => apis.userAPI.updateProfile(ctx) },
     { path: '/token', method: 'DELETE', handler: async (ctx, apis) => apis.userAPI.logout(ctx) },
     { path: '/forgot', method: 'POST', handler: async (ctx, apis) => apis.userAPI.forgot(ctx) },
     { path: '/verify', method: 'POST', handler: async (ctx, apis) => apis.userAPI.verify(ctx) },
+    { path: '/user/password', method: 'POST', handler: async (ctx, apis) => apis.userAPI.changePassword(ctx) },
+    { path: '/user/2fa', method: 'POST', handler: async (ctx, apis) => apis.userAPI.setup2FA(ctx) },
     
     // OAuth
     { path: '/oauth', method: 'GET', handler: async (ctx, apis) => apis.userAPI.oauthLogin(ctx) },
@@ -206,6 +217,10 @@ function matchRoute(path, method) {
     
     // Upload
     { path: '/upload', method: 'POST', handler: async (ctx, apis) => apis.adminAPI.upload(ctx) },
+    
+    // Reaction APIs
+    { path: '/reaction', method: 'GET', handler: async (ctx, apis) => apis.reactionAPI.get(ctx) },
+    { path: '/reaction', method: 'POST', handler: async (ctx, apis) => apis.reactionAPI.post(ctx) },
   ];
 
   // Exact match first
