@@ -3,7 +3,7 @@ export default async function onRequest(context) {
 
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   };
 
@@ -11,31 +11,31 @@ export default async function onRequest(context) {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  // Debug: check WALINE_KV directly (allow GET for debug)
+  // Debug: check KV access
   if (request.url.includes('?debug=1') || request.method === 'GET') {
-    const kvInfo = {
-      envExists: !!env,
-      envType: typeof env,
-      walineKvExists: env && 'WALINE_KV' in env,
-      walineKvType: env && env.WALINE_KV ? typeof env.WALINE_KV : 'undefined',
-      walineKvValue: env && env.WALINE_KV ? String(env.WALINE_KV) : null,
-      walineKvKeys: env && env.WALINE_KV && typeof env.WALINE_KV === 'object' 
-        ? Object.keys(env.WALINE_KV) : null,
-      hasGet: env && env.WALINE_KV && typeof env.WALINE_KV.get === 'function',
-      hasPut: env && env.WALINE_KV && typeof env.WALINE_KV.put === 'function',
+    const debugInfo = {
+      envWALINE_KV: env && env.WALINE_KV ? typeof env.WALINE_KV : 'not found',
+      globalThisWALINE_KV: typeof globalThis !== 'undefined' && globalThis.WALINE_KV ? typeof globalThis.WALINE_KV : 'not found',
     };
     
-    // Try to call get if it exists
-    if (env && env.WALINE_KV && typeof env.WALINE_KV.get === 'function') {
+    // Try to access KV from globalThis
+    const kv = globalThis.WALINE_KV;
+    if (kv) {
+      debugInfo.kvType = typeof kv;
+      debugInfo.hasGet = typeof kv.get === 'function';
+      debugInfo.hasPut = typeof kv.put === 'function';
+      
+      // Try a test call
       try {
-        const test = await env.WALINE_KV.get('test');
-        kvInfo.testResult = test;
+        await kv.put('test', 'hello');
+        const val = await kv.get('test');
+        debugInfo.testResult = val;
       } catch (e) {
-        kvInfo.testError = e.message;
+        debugInfo.testError = e.message;
       }
     }
     
-    return new Response(JSON.stringify(kvInfo, null, 2), {
+    return new Response(JSON.stringify(debugInfo, null, 2), {
       status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders }
     });
   }
@@ -47,18 +47,17 @@ export default async function onRequest(context) {
   }
 
   try {
-    if (!env || !env.WALINE_KV) {
+    // Access KV from globalThis
+    const kv = globalThis.WALINE_KV;
+    
+    if (!kv) {
       return new Response(JSON.stringify({ 
         errno: 500, 
-        errmsg: 'WALINE_KV not found',
-        env: !!env,
-        keys: env ? Object.keys(env) : null
+        errmsg: 'WALINE_KV not found in globalThis'
       }), {
         status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
     }
-
-    const kv = env.WALINE_KV;
 
     const body = await request.json();
     const { email, password, nick } = body;
