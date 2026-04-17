@@ -14,7 +14,16 @@ export default async function onRequest(context) {
 
   const jwtSecret = env.JWT_TOKEN || env.JWT_SECRET;
   if (!jwtSecret) {
-    return new Response(JSON.stringify({ errno: 500, errmsg: '服务器配置错误：缺少 JWT 密钥' }), {
+    return new Response(JSON.stringify({ 
+      errno: 500, 
+      errmsg: '服务器配置错误：缺少 JWT 密钥',
+      debug: {
+        hasEnv: !!env,
+        envKeys: env ? Object.keys(env) : null,
+        hasJWT_TOKEN: env && 'JWT_TOKEN' in env,
+        jwtTokenType: env && env.JWT_TOKEN ? typeof env.JWT_TOKEN : 'undefined'
+      }
+    }), {
       status: 500,
       headers: { 'Content-Type': 'application/json', ...corsHeaders }
     });
@@ -106,7 +115,7 @@ export default async function onRequest(context) {
         }
 
         // Find user by email
-        const userId = await globalThis.WALINE_KV.get('user:email:' + email.toLowerCase());
+        const userId = await globalThis.WALINE_KV.get('email:' + email.toLowerCase());
         if (!userId) {
           return new Response(JSON.stringify({ errno: 401, errmsg: '邮箱或密码错误' }), {
             status: 401,
