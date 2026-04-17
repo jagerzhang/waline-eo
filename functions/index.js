@@ -43,6 +43,9 @@ const getConfig = (env) => ({
   recaptchaV3Secret: env.RECAPTCHA_V3_SECRET,
   turnstileKey: env.TURNSTILE_KEY,
   turnstileSecret: env.TURNSTILE_SECRET,
+  geetestCaptchaId: env.GEETEST_CAPTCHA_ID,
+  geetestCaptchaKey: env.GEETEST_CAPTCHA_KEY,
+  geetestVersion: env.GEETEST_VERSION || 'v4', // 'v3' or 'v4'
   smtp: {
     host: env.SMTP_HOST,
     port: parseInt(env.SMTP_PORT) || 465,

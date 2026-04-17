@@ -1194,12 +1194,14 @@ export function adminUI(request) {
   <div id="loginPage" class="login-page">
     <div class="login-box">
       <h1>Waline 管理后台</h1>
-      <p class="subtitle">登录以管理评论</p>
-      <div style="background: #e3f2fd; border: 1px solid #2196f3; border-radius: 8px; padding: 12px; margin-bottom: 20px; font-size: 14px; color: #1565c0;">
+      <p class="subtitle" id="authSubtitle">登录以管理评论</p>
+      <div id="authHint" style="background: #e3f2fd; border: 1px solid #2196f3; border-radius: 8px; padding: 12px; margin-bottom: 20px; font-size: 14px; color: #1565c0;">
         <strong>首次使用？</strong><br>
         第一个注册的用户将自动成为管理员。<br>
         已有账号？请直接登录。
       </div>
+      
+      <!-- Login Form -->
       <form id="loginForm">
         <div class="form-group">
           <label for="loginEmail">邮箱</label>
@@ -1210,6 +1212,33 @@ export function adminUI(request) {
           <input type="password" id="loginPassword" placeholder="请输入密码" required>
         </div>
         <button type="submit" class="btn btn-primary btn-block">登录</button>
+        <div style="text-align: center; margin-top: 16px;">
+          <a href="#" id="showRegister" style="color: var(--primary); text-decoration: none; font-size: 14px;">还没有账号？立即注册</a>
+        </div>
+      </form>
+      
+      <!-- Register Form (Hidden by default) -->
+      <form id="registerForm" style="display: none;">
+        <div class="form-group">
+          <label for="registerEmail">邮箱</label>
+          <input type="email" id="registerEmail" placeholder="请输入邮箱" required>
+        </div>
+        <div class="form-group">
+          <label for="registerNick">昵称</label>
+          <input type="text" id="registerNick" placeholder="请输入昵称" required>
+        </div>
+        <div class="form-group">
+          <label for="registerPassword">密码</label>
+          <input type="password" id="registerPassword" placeholder="请输入密码（至少6位）" required minlength="6">
+        </div>
+        <div class="form-group">
+          <label for="registerPasswordConfirm">确认密码</label>
+          <input type="password" id="registerPasswordConfirm" placeholder="请再次输入密码" required minlength="6">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">注册</button>
+        <div style="text-align: center; margin-top: 16px;">
+          <a href="#" id="showLogin" style="color: var(--primary); text-decoration: none; font-size: 14px;">已有账号？立即登录</a>
+        </div>
       </form>
     </div>
   </div>
@@ -1795,6 +1824,13 @@ export function adminUI(request) {
         });
       },
 
+      register(email, password, nick) {
+        return this.request('register', {
+          method: 'POST',
+          body: JSON.stringify({ email, password, nick })
+        });
+      },
+
       getComments(params = {}) {
         const query = new URLSearchParams(params).toString();
         return this.request(\`comment?\${query}\`);
@@ -1883,8 +1919,19 @@ export function adminUI(request) {
 
     // Event Listeners
     function initEventListeners() {
-      // Login
+      // Login & Register
       document.getElementById('loginForm').addEventListener('submit', handleLogin);
+      document.getElementById('registerForm').addEventListener('submit', handleRegister);
+      
+      // Toggle between login and register forms
+      document.getElementById('showRegister').addEventListener('click', (e) => {
+        e.preventDefault();
+        showRegisterForm();
+      });
+      document.getElementById('showLogin').addEventListener('click', (e) => {
+        e.preventDefault();
+        showLoginForm();
+      });
       
       // Navigation
       document.querySelectorAll('.nav-item').forEach(item => {
@@ -1958,6 +2005,55 @@ export function adminUI(request) {
       } catch (error) {
         // Error handled by api client
       }
+    }
+
+    async function handleRegister(e) {
+      e.preventDefault();
+      const email = document.getElementById('registerEmail').value;
+      const nick = document.getElementById('registerNick').value;
+      const password = document.getElementById('registerPassword').value;
+      const passwordConfirm = document.getElementById('registerPasswordConfirm').value;
+      
+      // Validate password match
+      if (password !== passwordConfirm) {
+        showToast('两次输入的密码不一致', 'error');
+        return;
+      }
+      
+      // Validate password length
+      if (password.length < 6) {
+        showToast('密码至少需要6位', 'error');
+        return;
+      }
+      
+      try {
+        const data = await api.register(email, password, nick);
+        if (data && data.data) {
+          state.token = data.data.token;
+          state.user = data.data;
+          localStorage.setItem('waline_token', state.token);
+          localStorage.setItem('waline_user', JSON.stringify(state.user));
+          showAdmin();
+          loadDashboard();
+          showToast('注册成功！欢迎成为管理员', 'success');
+        }
+      } catch (error) {
+        // Error handled by api client
+      }
+    }
+
+    function showRegisterForm() {
+      document.getElementById('loginForm').style.display = 'none';
+      document.getElementById('registerForm').style.display = 'block';
+      document.getElementById('authSubtitle').textContent = '注册成为管理员';
+      document.getElementById('authHint').innerHTML = '<strong>注册须知</strong><br>第一个注册的用户将自动成为管理员';
+    }
+
+    function showLoginForm() {
+      document.getElementById('registerForm').style.display = 'none';
+      document.getElementById('loginForm').style.display = 'block';
+      document.getElementById('authSubtitle').textContent = '登录以管理评论';
+      document.getElementById('authHint').innerHTML = '<strong>首次使用？</strong><br>第一个注册的用户将自动成为管理员。<br>已有账号？请直接登录。';
     }
 
     function logout() {
