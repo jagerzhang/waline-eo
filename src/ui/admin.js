@@ -1783,7 +1783,7 @@ export function adminUI(request) {
     // API Client
     const api = {
       async request(endpoint, options = {}) {
-        const url = endpoint.startsWith('http') ? endpoint : \`/api/\${endpoint}\`;
+        const url = endpoint.startsWith('http') ? endpoint : \`/\${endpoint}\`;
         const headers = {
           'Content-Type': 'application/json',
           ...options.headers
