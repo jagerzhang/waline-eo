@@ -50,7 +50,7 @@ export default async function onRequest(context) {
 
     // Check if this is the first user (make them admin)
     const allUsers = await kv.list({ prefix: 'user:' });
-    const isFirstUser = allUsers.keys.filter(k => !k.name.includes(':email:')).length === 0;
+    const isFirstUser = !allUsers.keys || allUsers.keys.filter(k => !k.name.includes(':email:')).length === 0;
 
     const user = {
       id: userId,

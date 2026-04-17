@@ -62,6 +62,12 @@ export default async function onRequest(context) {
         if (type === 'recent') {
           // Get recent comments
           const { keys } = await globalThis.WALINE_KV.list({ prefix: 'waline:comment:' });
+          if (!keys || keys.length === 0) {
+            return new Response(JSON.stringify({ errno: 0, data: [] }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json', ...corsHeaders }
+            });
+          }
           const commentPromises = keys
             .filter(key => !key.name.includes(':url:') && !key.name.includes(':status:'))
             .map(key => globalThis.WALINE_KV.get(key.name));
@@ -101,6 +107,19 @@ export default async function onRequest(context) {
 
         // Get comments for a path
         const { keys } = await globalThis.WALINE_KV.list({ prefix: 'waline:comment:' });
+        if (!keys || keys.length === 0) {
+          return new Response(JSON.stringify({
+            errno: 0,
+            data: [],
+            page,
+            pageSize,
+            totalPages: 0,
+            total: 0
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
         const commentPromises = keys
           .filter(key => !key.name.includes(':url:') && !key.name.includes(':status:'))
           .map(key => globalThis.WALINE_KV.get(key.name));

@@ -94,7 +94,7 @@ export default async function onRequest(context) {
 
     // List all keys with email: prefix for this email
     const allEmailKeys = await kv.list({ prefix: 'email:' });
-    debug.allEmailKeys = allEmailKeys.keys.map(k => k.name);
+    debug.allEmailKeys = (allEmailKeys.keys || []).map(k => k.name);
 
     return new Response(JSON.stringify({
       errno: 0,
