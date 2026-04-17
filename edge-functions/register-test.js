@@ -14,12 +14,12 @@ export default async function onRequest(context) {
     const body = await request.json();
     
     // Check KV
-    if (!env.WALINE_KV) {
+    if (!globalThis.WALINE_KV) {
       return new Response(JSON.stringify({ error: 'KV not configured' }), { status: 500 });
     }
 
     // Simple test: try to get a key
-    const test = await env.WALINE_KV.get('test:key');
+    const test = await globalThis.WALINE_KV.get('test:key');
     
     return new Response(JSON.stringify({ 
       status: 'ok', 

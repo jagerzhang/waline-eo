@@ -106,7 +106,7 @@ export default async function onRequest(context) {
         }
 
         // Find user by email
-        const userId = await env.WALINE_KV.get('user:email:' + email.toLowerCase());
+        const userId = await globalThis.WALINE_KV.get('user:email:' + email.toLowerCase());
         if (!userId) {
           return new Response(JSON.stringify({ errno: 401, errmsg: '邮箱或密码错误' }), {
             status: 401,
@@ -114,7 +114,7 @@ export default async function onRequest(context) {
           });
         }
 
-        const userData = await env.WALINE_KV.get('user:' + userId);
+        const userData = await globalThis.WALINE_KV.get('user:' + userId);
         if (!userData) {
           return new Response(JSON.stringify({ errno: 401, errmsg: '邮箱或密码错误' }), {
             status: 401,
@@ -196,7 +196,7 @@ export default async function onRequest(context) {
 
         const { nick, url, avatar } = body;
 
-        const userData = await env.WALINE_KV.get('user:' + decoded.objectId);
+        const userData = await globalThis.WALINE_KV.get('user:' + decoded.objectId);
         if (!userData) {
           return new Response(JSON.stringify({ errno: 404, errmsg: '用户不存在' }), {
             status: 404,
@@ -213,7 +213,7 @@ export default async function onRequest(context) {
           updatedAt: new Date().toISOString()
         };
 
-        await env.WALINE_KV.put('user:' + user.objectId || user.id, JSON.stringify(updates));
+        await globalThis.WALINE_KV.put('user:' + user.objectId || user.id, JSON.stringify(updates));
 
         return new Response(JSON.stringify({
           errno: 0,

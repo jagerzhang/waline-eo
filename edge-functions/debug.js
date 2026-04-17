@@ -6,13 +6,13 @@ export default async function onRequest(context) {
   
   // Check WALINE_KV
   let kvInfo = 'not found';
-  if (env.WALINE_KV) {
+  if (globalThis.WALINE_KV) {
     kvInfo = {
-      type: typeof env.WALINE_KV,
-      keys: Object.keys(env.WALINE_KV),
-      hasGet: typeof env.WALINE_KV.get === 'function',
-      hasPut: typeof env.WALINE_KV.put === 'function',
-      hasList: typeof env.WALINE_KV.list === 'function'
+      type: typeof globalThis.WALINE_KV,
+      keys: Object.keys(globalThis.WALINE_KV),
+      hasGet: typeof globalThis.WALINE_KV.get === 'function',
+      hasPut: typeof globalThis.WALINE_KV.put === 'function',
+      hasList: typeof globalThis.WALINE_KV.list === 'function'
     };
   }
   

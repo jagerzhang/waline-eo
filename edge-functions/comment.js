@@ -59,11 +59,11 @@ export default async function onRequest(context) {
 
         if (type === 'recent') {
           // Get recent comments
-          const { keys } = await env.WALINE_KV.list({ prefix: 'waline:comment:' });
+          const { keys } = await globalThis.WALINE_KV.list({ prefix: 'waline:comment:' });
           const comments = [];
           for (const key of keys) {
             if (key.name.includes(':url:') || key.name.includes(':status:')) continue;
-            const data = await env.WALINE_KV.get(key.name);
+            const data = await globalThis.WALINE_KV.get(key.name);
             if (data) {
               const c = JSON.parse(data);
               if (c.status === 'approved' || !c.status) {
@@ -93,11 +93,11 @@ export default async function onRequest(context) {
         }
 
         // Get comments for a path
-        const { keys } = await env.WALINE_KV.list({ prefix: 'waline:comment:' });
+        const { keys } = await globalThis.WALINE_KV.list({ prefix: 'waline:comment:' });
         const allComments = [];
         for (const key of keys) {
           if (key.name.includes(':url:') || key.name.includes(':status:')) continue;
-          const data = await env.WALINE_KV.get(key.name);
+          const data = await globalThis.WALINE_KV.get(key.name);
           if (data) {
             const c = JSON.parse(data);
             if (c.url === path) {
@@ -208,7 +208,7 @@ export default async function onRequest(context) {
           updatedAt: new Date().toISOString()
         };
 
-        await env.WALINE_KV.put('waline:comment:' + commentId, JSON.stringify(newComment));
+        await globalThis.WALINE_KV.put('waline:comment:' + commentId, JSON.stringify(newComment));
 
         return new Response(JSON.stringify({
           errno: 0,
@@ -246,7 +246,7 @@ export default async function onRequest(context) {
           });
         }
 
-        const data = await env.WALINE_KV.get('waline:comment:' + objectId);
+        const data = await globalThis.WALINE_KV.get('waline:comment:' + objectId);
         if (!data) {
           return new Response(JSON.stringify({ errno: 404, errmsg: '评论不存在' }), {
             status: 404,
@@ -270,7 +270,7 @@ export default async function onRequest(context) {
         }
 
         updates.updatedAt = new Date().toISOString();
-        await env.WALINE_KV.put('waline:comment:' + objectId, JSON.stringify(updates));
+        await globalThis.WALINE_KV.put('waline:comment:' + objectId, JSON.stringify(updates));
 
         return new Response(JSON.stringify({ errno: 0, data: updates }), {
           status: 200,
@@ -295,7 +295,7 @@ export default async function onRequest(context) {
           });
         }
 
-        const data = await env.WALINE_KV.get('waline:comment:' + objectId);
+        const data = await globalThis.WALINE_KV.get('waline:comment:' + objectId);
         if (!data) {
           return new Response(JSON.stringify({ errno: 404, errmsg: '评论不存在' }), {
             status: 404,
@@ -312,7 +312,7 @@ export default async function onRequest(context) {
           });
         }
 
-        await env.WALINE_KV.delete('waline:comment:' + objectId);
+        await globalThis.WALINE_KV.delete('waline:comment:' + objectId);
 
         return new Response(JSON.stringify({ errno: 0, data: null }), {
           status: 200,

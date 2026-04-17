@@ -1,43 +1,14 @@
 export default async function onRequest(context) {
-  const { request, env } = context;
+  const { request } = context;
 
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   };
 
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
-  }
-
-  // Debug: check KV access
-  if (request.url.includes('?debug=1') || request.method === 'GET') {
-    const debugInfo = {
-      envWALINE_KV: env && env.WALINE_KV ? typeof env.WALINE_KV : 'not found',
-      globalThisWALINE_KV: typeof globalThis !== 'undefined' && globalThis.WALINE_KV ? typeof globalThis.WALINE_KV : 'not found',
-    };
-    
-    // Try to access KV from globalThis
-    const kv = globalThis.WALINE_KV;
-    if (kv) {
-      debugInfo.kvType = typeof kv;
-      debugInfo.hasGet = typeof kv.get === 'function';
-      debugInfo.hasPut = typeof kv.put === 'function';
-      
-      // Try a test call
-      try {
-        await kv.put('test', 'hello');
-        const val = await kv.get('test');
-        debugInfo.testResult = val;
-      } catch (e) {
-        debugInfo.testError = e.message;
-      }
-    }
-    
-    return new Response(JSON.stringify(debugInfo, null, 2), {
-      status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders }
-    });
   }
 
   if (request.method !== 'POST') {
@@ -47,14 +18,10 @@ export default async function onRequest(context) {
   }
 
   try {
-    // Access KV from globalThis
     const kv = globalThis.WALINE_KV;
     
     if (!kv) {
-      return new Response(JSON.stringify({ 
-        errno: 500, 
-        errmsg: 'WALINE_KV not found in globalThis'
-      }), {
+      return new Response(JSON.stringify({ errno: 500, errmsg: 'WALINE_KV not found' }), {
         status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
     }
@@ -68,7 +35,6 @@ export default async function onRequest(context) {
       });
     }
 
-    // Check existing user
     const existing = await kv.get('email:' + email.toLowerCase());
     if (existing) {
       return new Response(JSON.stringify({ errno: 409, errmsg: '邮箱已注册' }), {
@@ -76,10 +42,7 @@ export default async function onRequest(context) {
       });
     }
 
-    // Generate ID
     const userId = Date.now().toString(36) + Math.random().toString(36).slice(2, 11);
-
-    // Hash password
     const salt = Date.now() + '' + Math.random();
     const encoder = new TextEncoder();
     const hashBuf = await crypto.subtle.digest('SHA-256', encoder.encode(password + salt));
@@ -104,7 +67,7 @@ export default async function onRequest(context) {
     }), { status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders }});
 
   } catch (err) {
-    return new Response(JSON.stringify({ errno: 500, errmsg: err.message, stack: err.stack }), {
+    return new Response(JSON.stringify({ errno: 500, errmsg: err.message }), {
       status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders }
     });
   }
