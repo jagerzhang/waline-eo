@@ -11,8 +11,8 @@ export default async function onRequest(context) {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  // Debug: check WALINE_KV directly
-  if (request.url.includes('?debug=1')) {
+  // Debug: check WALINE_KV directly (allow GET for debug)
+  if (request.url.includes('?debug=1') || request.method === 'GET') {
     const kvInfo = {
       envExists: !!env,
       envType: typeof env,
