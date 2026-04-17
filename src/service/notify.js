@@ -1,25 +1,8 @@
 /**
  * Notification Service for Waline
  * Supports: Email (SMTP), WeChat (ServerChan), Telegram, QQ, Discord, Lark/Feishu
+ * EdgeOne Pages Functions compatible - no Node.js dependencies
  */
-
-const nunjucks = require('nunjucks');
-
-// Configure Nunjucks environment
-const env = new nunjucks.Environment();
-
-// Add custom filters
-env.addFilter('date', (date, format = 'YYYY-MM-DD HH:mm:ss') => {
-  const d = new Date(date);
-  const pad = (n) => n.toString().padStart(2, '0');
-  return format
-    .replace('YYYY', d.getFullYear())
-    .replace('MM', pad(d.getMonth() + 1))
-    .replace('DD', pad(d.getDate()))
-    .replace('HH', pad(d.getHours()))
-    .replace('mm', pad(d.getMinutes()))
-    .replace('ss', pad(d.getSeconds()));
-});
 
 // Default templates matching official Waline behavior
 const DEFAULT_TEMPLATES = {
@@ -66,18 +49,90 @@ const DEFAULT_TEMPLATES = {
 };
 
 /**
- * Render template with data
+ * Format date string
+ * @param {string|Date} date - Date to format
+ * @param {string} format - Format string
+ * @returns {string} Formatted date
+ */
+function formatDate(date, format = 'YYYY-MM-DD HH:mm:ss') {
+  const d = new Date(date);
+  const pad = (n) => n.toString().padStart(2, '0');
+  return format
+    .replace('YYYY', d.getFullYear())
+    .replace('MM', pad(d.getMonth() + 1))
+    .replace('DD', pad(d.getDate()))
+    .replace('HH', pad(d.getHours()))
+    .replace('mm', pad(d.getMinutes()))
+    .replace('ss', pad(d.getSeconds()));
+}
+
+/**
+ * Render template with data using simple template strings
  * @param {string} template - Template string
  * @param {object} data - Data to render
  * @returns {string} Rendered string
  */
 function renderTemplate(template, data) {
   try {
-    return env.renderString(template, data);
+    if (!template) return '';
+
+    let result = template;
+
+    // Handle {{{var}}} - raw HTML (unescaped)
+    result = result.replace(/\{\{\{([^}]+)\}\}\}/g, (match, path) => {
+      const value = getValueByPath(data, path.trim());
+      return value !== undefined ? value : '';
+    });
+
+    // Handle {{var}} - escaped HTML
+    result = result.replace(/\{\{([^}]+)\}\}/g, (match, path) => {
+      const value = getValueByPath(data, path.trim());
+      return value !== undefined ? escapeHtml(value) : '';
+    });
+
+    return result;
   } catch (e) {
     console.error('Template render error:', e);
     return template;
   }
+}
+
+/**
+ * Get value from object by dot path
+ * @param {object} obj - Object to traverse
+ * @param {string} path - Dot notation path
+ * @returns {any} Value at path
+ */
+function getValueByPath(obj, path) {
+  if (!obj || !path) return undefined;
+
+  const keys = path.split('.');
+  let value = obj;
+
+  for (const key of keys) {
+    if (value === null || value === undefined) {
+      return undefined;
+    }
+    value = value[key];
+  }
+
+  return value;
+}
+
+/**
+ * Escape HTML special characters
+ * @param {string} text - Text to escape
+ * @returns {string} Escaped text
+ */
+function escapeHtml(text) {
+  if (!text) return '';
+  if (typeof text !== 'string') return String(text);
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 /**
@@ -92,11 +147,11 @@ async function sendEmail(options, config) {
   }
 
   try {
-    const { host, port, secure, user, pass, from } = config;
+    const { from } = config;
 
-    // Build SMTP command for EdgeOne/Worker environment
+    // Build email data
     const emailData = {
-      from: from || user,
+      from: from || config.user,
       to: options.to,
       subject: options.subject,
       html: options.html,
@@ -397,9 +452,7 @@ async function sendLark(options, config) {
 
   try {
     const { webhook, secret } = config;
-    let url = webhook;
 
-    // Generate signature if secret is provided
     const headers = {
       'Content-Type': 'application/json'
     };
@@ -440,7 +493,7 @@ async function sendLark(options, config) {
       };
     }
 
-    const response = await fetch(url, {
+    const response = await fetch(webhook, {
       method: 'POST',
       headers,
       body: JSON.stringify(body)
@@ -477,21 +530,6 @@ async function generateLarkSign(secret, timestamp) {
   );
 
   return btoa(String.fromCharCode(...new Uint8Array(signature)));
-}
-
-/**
- * Escape HTML special characters
- * @param {string} text - Text to escape
- * @returns {string} Escaped text
- */
-function escapeHtml(text) {
-  if (!text) return '';
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
 }
 
 /**
@@ -677,7 +715,7 @@ async function notify(comment, parent, config) {
   return results;
 }
 
-module.exports = {
+export {
   notify,
   sendEmail,
   sendWeChat,

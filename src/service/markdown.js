@@ -1,10 +1,9 @@
 /**
  * Markdown Service for Waline
- * Features: Markdown-it with plugins, XSS sanitization, syntax highlighting
+ * Simple markdown parser for EdgeOne Pages Functions
+ * No external dependencies - uses regex-based parsing
+ * EdgeOne Pages Functions compatible
  */
-
-const MarkdownIt = require('markdown-it');
-const xss = require('xss');
 
 // Default XSS white list matching official Waline behavior
 const DEFAULT_WHITE_LIST = {
@@ -78,200 +77,8 @@ const DEFAULT_WHITE_LIST = {
   source: ['src', 'type']
 };
 
-// MathJax configuration
-const MATHJAX_CONFIG = {
-  tex: {
-    inlineMath: [['$', '$'], ['\\(', '\\)']],
-    displayMath: [['$$', '$$'], ['\\[', '\\]']],
-    processEscapes: true,
-    processEnvironments: true
-  },
-  options: {
-    skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
-  }
-};
-
-// KaTeX configuration
-const KATEX_CONFIG = {
-  throwOnError: false,
-  strict: false,
-  trust: false,
-  macros: {}
-};
-
-/**
- * Create markdown-it instance with plugins
- * @param {object} options - Configuration options
- * @returns {MarkdownIt} Configured markdown-it instance
- */
-function createMarkdownIt(options = {}) {
-  const {
-    emoji = true,
-    sub = true,
-    sup = true,
-    math = false,
-    mathEngine = 'katex', // 'katex' or 'mathjax'
-    highlight = true,
-    linkify = true,
-    breaks = true,
-    html = false
-  } = options;
-
-  // Base configuration
-  const md = new MarkdownIt({
-    html,
-    xhtmlOut: false,
-    breaks,
-    langPrefix: 'language-',
-    linkify,
-    typographer: true,
-    quotes: '""''',
-    highlight: highlight ? createHighlighter(options.highlightOptions) : null
-  });
-
-  // Enable plugins
-  if (emoji) {
-    md.use(require('markdown-it-emoji'));
-    // Add custom emoji definitions
-    md.use(require('markdown-it-emoji'), {
-      defs: {
-        ...require('markdown-it-emoji/lib/data/full.json'),
-        '+1': '\u{1F44D}',
-        '-1': '\u{1F44E}',
-        '100': '\u{1F4AF}',
-        'fire': '\u{1F525}',
-        'rocket': '\u{1F680}'
-      }
-    });
-  }
-
-  if (sub) {
-    md.use(require('markdown-it-sub'));
-  }
-
-  if (sup) {
-    md.use(require('markdown-it-sup'));
-  }
-
-  if (math) {
-    if (mathEngine === 'katex') {
-      md.use(require('markdown-it-katex'), KATEX_CONFIG);
-    } else {
-      md.use(require('markdown-it-mathjax3'), MATHJAX_CONFIG);
-    }
-  }
-
-  // Container plugin for alerts/notices
-  md.use(require('markdown-it-container'), 'tip', {
-    validate: (params) => params.trim().match(/^tip\s*(.*)$/),
-    render: (tokens, idx) => {
-      const m = tokens[idx].info.trim().match(/^tip\s*(.*)$/);
-      if (tokens[idx].nesting === 1) {
-        return `<div class="waline-tip">${m[1] ? `<div class="waline-tip-title">${md.utils.escapeHtml(m[1])}</div>` : ''}`;
-      }
-      return '</div>';
-    }
-  });
-
-  md.use(require('markdown-it-container'), 'warning', {
-    validate: (params) => params.trim().match(/^warning\s*(.*)$/),
-    render: (tokens, idx) => {
-      const m = tokens[idx].info.trim().match(/^warning\s*(.*)$/);
-      if (tokens[idx].nesting === 1) {
-        return `<div class="waline-warning">${m[1] ? `<div class="waline-warning-title">${md.utils.escapeHtml(m[1])}</div>` : ''}`;
-      }
-      return '</div>';
-    }
-  });
-
-  md.use(require('markdown-it-container'), 'danger', {
-    validate: (params) => params.trim().match(/^danger\s*(.*)$/),
-    render: (tokens, idx) => {
-      const m = tokens[idx].info.trim().match(/^danger\s*(.*)$/);
-      if (tokens[idx].nesting === 1) {
-        return `<div class="waline-danger">${m[1] ? `<div class="waline-danger-title">${md.utils.escapeHtml(m[1])}</div>` : ''}`;
-      }
-      return '</div>';
-    }
-  });
-
-  // Mark plugin
-  md.use(require('markdown-it-mark'));
-
-  // Ins plugin
-  md.use(require('markdown-it-ins'));
-
-  // Deflist plugin
-  md.use(require('markdown-it-deflist'));
-
-  // Footnote plugin
-  md.use(require('markdown-it-footnote'));
-
-  // Task lists
-  md.use(require('markdown-it-task-lists'), {
-    enabled: true,
-    label: true,
-    labelAfter: true
-  });
-
-  // Custom link handling
-  md.use(require('markdown-it-link-attributes'), {
-    matcher: (href) => href.startsWith('http'),
-    attrs: {
-      target: '_blank',
-      rel: 'noopener noreferrer nofollow'
-    }
-  });
-
-  return md;
-}
-
-/**
- * Create syntax highlighter function
- * @param {object} options - Highlight options
- * @returns {Function} Highlighter function
- */
-function createHighlighter(options = {}) {
-  const {
-    lineNumbers = true,
-    preload = ['javascript', 'css', 'html', 'python', 'bash'],
-    theme = 'default'
-  } = options;
-
-  return function(str, lang) {
-    if (!lang) {
-      return `<pre class="waline-code"><code>${escapeHtml(str)}</code></pre>`;
-    }
-
-    const langClass = `language-${lang}`;
-
-    if (lineNumbers) {
-      const lines = str.split('\n').length;
-      const lineNumbersHtml = Array.from({ length: lines }, (_, i) =>
-        `<span class="line-number">${i + 1}</span>`
-      ).join('');
-
-      return `<div class="waline-code-block ${theme}">
-        <div class="code-header">
-          <span class="code-lang">${lang}</span>
-          <button class="copy-btn" data-clipboard-text="${escapeHtml(str)}">Copy</button>
-        </div>
-        <div class="code-wrapper">
-          <div class="line-numbers">${lineNumbersHtml}</div>
-          <pre class="${langClass}"><code class="${langClass}">${escapeHtml(str)}</code></pre>
-        </div>
-      </div>`;
-    }
-
-    return `<div class="waline-code-block ${theme}">
-      <div class="code-header">
-        <span class="code-lang">${lang}</span>
-        <button class="copy-btn" data-clipboard-text="${escapeHtml(str)}">Copy</button>
-      </div>
-      <pre class="${langClass}"><code class="${langClass}">${escapeHtml(str)}</code></pre>
-    </div>`;
-  };
-}
+// Allowed URL protocols
+const ALLOWED_PROTOCOLS = ['http:', 'https:', 'mailto:', 'tel:'];
 
 /**
  * Escape HTML special characters
@@ -280,6 +87,7 @@ function createHighlighter(options = {}) {
  */
 function escapeHtml(text) {
   if (!text) return '';
+  if (typeof text !== 'string') return String(text);
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -289,7 +97,26 @@ function escapeHtml(text) {
 }
 
 /**
- * Sanitize HTML content using XSS filter
+ * Check if URL is safe
+ * @param {string} url - URL to check
+ * @returns {boolean} True if safe
+ */
+function isSafeUrl(url) {
+  if (!url) return false;
+  if (url.startsWith('#')) return true;
+  if (url.startsWith('/')) return true;
+  if (url.startsWith('./')) return true;
+
+  try {
+    const parsed = new URL(url);
+    return ALLOWED_PROTOCOLS.includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sanitize HTML content using white list
  * @param {string} html - HTML content to sanitize
  * @param {object} whiteList - Custom white list
  * @returns {string} Sanitized HTML
@@ -297,40 +124,61 @@ function escapeHtml(text) {
 function sanitizeHtml(html, whiteList = DEFAULT_WHITE_LIST) {
   if (!html) return '';
 
-  const xssOptions = {
-    whiteList,
-    stripIgnoreTag: true,
-    stripIgnoreTagBody: ['script', 'style'],
-    onIgnoreTag: (tag, html, options) => {
-      // Allow specific data attributes
-      if (tag.startsWith('data-')) {
-        return html;
-      }
-      return undefined;
-    },
-    onIgnoreTagAttr: (tag, name, value, isWhiteAttr) => {
-      // Allow data-* attributes
-      if (name.startsWith('data-')) {
-        return `${name}="${xss.escapeAttrValue(value)}"`;
-      }
-      // Allow specific class patterns
-      if (name === 'class') {
-        const allowedClasses = value.split(' ').filter(cls =>
-          cls.startsWith('language-') ||
-          cls.startsWith('waline-') ||
-          cls.startsWith('line-') ||
-          cls.startsWith('hljs-') ||
-          ['copy-btn', 'code-header', 'code-wrapper', 'code-lang'].includes(cls)
-        );
-        if (allowedClasses.length > 0) {
-          return `class="${allowedClasses.join(' ')}"`;
+  // Simple HTML sanitizer using DOM-like parsing
+  // Remove script and style tags completely
+  let sanitized = html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+
+  // Process each tag
+  sanitized = sanitized.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g, (match, tagName) => {
+    const lowerTag = tagName.toLowerCase();
+
+    // Check if tag is in white list
+    if (!whiteList[lowerTag]) {
+      // For non-whitelisted tags, encode them
+      return escapeHtml(match);
+    }
+
+    // Parse attributes for whitelisted tags
+    const allowedAttrs = whiteList[lowerTag];
+    const isClosing = match.startsWith('</');
+
+    if (isClosing) {
+      return `</${lowerTag}>`;
+    }
+
+    // Extract attributes
+    const attrRegex = /([a-zA-Z-]+)(?:=["']([^"']*)["'])?/g;
+    let attrMatch;
+    let validAttrs = [];
+
+    // Skip the tag name itself
+    const attrString = match.replace(new RegExp(`^<${tagName}\\s*`, 'i'), '').replace(/>$/, '');
+
+    while ((attrMatch = attrRegex.exec(attrString)) !== null) {
+      const attrName = attrMatch[1].toLowerCase();
+      const attrValue = attrMatch[2];
+
+      // Check if attribute is allowed
+      if (allowedAttrs.includes(attrName) || attrName.startsWith('data-')) {
+        // Special handling for href/src attributes
+        if ((attrName === 'href' || attrName === 'src') && attrValue) {
+          if (isSafeUrl(attrValue)) {
+            validAttrs.push(`${attrName}="${escapeHtml(attrValue)}"`);
+          }
+        } else if (attrValue !== undefined) {
+          validAttrs.push(`${attrName}="${escapeHtml(attrValue)}"`);
+        } else {
+          validAttrs.push(attrName);
         }
       }
-      return undefined;
     }
-  };
 
-  return xss(html, xssOptions);
+    return `<${lowerTag}${validAttrs.length > 0 ? ' ' + validAttrs.join(' ') : ''}>`;
+  });
+
+  return sanitized;
 }
 
 /**
@@ -345,56 +193,190 @@ function parse(markdown, options = {}) {
   const {
     sanitize = true,
     whiteList,
-    markdownOptions = {}
+    breaks = true,
+    linkify = true
   } = options;
 
-  // Create markdown-it instance
-  const md = createMarkdownIt(markdownOptions);
+  let html = markdown;
 
-  // Parse markdown
-  let html = md.render(markdown);
+  // Escape HTML entities first
+  html = escapeHtml(html);
+
+  // Code blocks (must be before inline code)
+  html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
+    const language = lang || 'text';
+    const escapedCode = code.trim();
+    return `<pre class="language-${language}"><code class="language-${language}">${escapedCode}</code></pre>`;
+  });
+
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // Headers
+  html = html.replace(/^###### (.*$)/gim, '<h6>$1</h6>');
+  html = html.replace(/^##### (.*$)/gim, '<h5>$1</h5>');
+  html = html.replace(/^#### (.*$)/gim, '<h4>$1</h4>');
+  html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+  html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+  html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+
+  // Horizontal rule
+  html = html.replace(/^\s*[-*_]{3,}\s*$/gim, '<hr>');
+
+  // Bold and Italic (order matters)
+  html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  html = html.replace(/___(.*?)___/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/__(.*?)__/g, '<strong>$1</strong>');
+  html = html.replace(/_(.*?)_/g, '<em>$1</em>');
+
+  // Strikethrough
+  html = html.replace(/~~(.*?)~~/g, '<del>$1</del>');
+
+  // Mark/highlight
+  html = html.replace(/==(.*?)==/g, '<mark>$1</mark>');
+
+  // Subscript and superscript
+  html = html.replace(/~\~(.*?)~~~/g, '<sub>$1</sub>');
+  html = html.replace(/\^\^(.*?)\^\^/g, '<sup>$1</sup>');
+
+  // Images (must be before links)
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, src) => {
+    if (isSafeUrl(src)) {
+      return `<img src="${src}" alt="${alt}" loading="lazy">`;
+    }
+    return '';
+  });
+
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, href) => {
+    if (isSafeUrl(href)) {
+      const isExternal = href.startsWith('http');
+      const attrs = isExternal ? ' target="_blank" rel="noopener noreferrer nofollow"' : '';
+      return `<a href="${href}"${attrs}>${text}</a>`;
+    }
+    return text;
+  });
+
+  // Auto-link URLs
+  if (linkify) {
+    html = html.replace(/(https?:\/\/[^\s<>\[\]()]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer nofollow">$1</a>');
+  }
+
+  // Blockquotes
+  html = html.replace(/^> (.*$)/gim, '<blockquote>$1</blockquote>');
+  // Merge consecutive blockquotes
+  html = html.replace(/<\/blockquote>\s*<blockquote>/g, '<br>');
+
+  // Unordered lists
+  html = html.replace(/^(\s*)[-*+] (.*$)/gim, (match, indent, content) => {
+    const depth = Math.floor(indent.length / 2);
+    return `${'<ul>'.repeat(depth + 1)}<li>${content}</li>${'</ul>'.repeat(depth + 1)}`;
+  });
+
+  // Ordered lists
+  html = html.replace(/^(\s*)\d+\. (.*$)/gim, (match, indent, content) => {
+    const depth = Math.floor(indent.length / 2);
+    return `${'<ol>'.repeat(depth + 1)}<li>${content}</li>${'</ol>'.repeat(depth + 1)}`;
+  });
+
+  // Tables (simple syntax)
+  html = html.replace(/\|(.+)\|\n\|[-:| ]+\|\n((?:\|.+\|\n?)+)/g, (match, header, rows) => {
+    const headerCells = header.split('|').map(c => c.trim()).filter(c => c);
+    const headerHtml = '<tr>' + headerCells.map(c => `<th>${c}</th>`).join('') + '</tr>';
+
+    const rowLines = rows.trim().split('\n');
+    const bodyHtml = rowLines.map(line => {
+      const cells = line.split('|').map(c => c.trim()).filter(c => c);
+      return '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>';
+    }).join('');
+
+    return `<table><thead>${headerHtml}</thead><tbody>${bodyHtml}</tbody></table>`;
+  });
+
+  // Definition lists
+  html = html.replace(/^([^\n:]+):\s+(.+)$/gim, '<dl><dt>$1</dt><dd>$2</dd></dl>');
+
+  // Footnotes
+  html = html.replace(/\[\^(\d+)\]/g, '<sup class="footnote-ref"><a href="#fn$1">$1</a></sup>');
+
+  // Task lists
+  html = html.replace(/\[ \] (.*$)/gim, '<li class="task-list-item"><input type="checkbox" disabled> $1</li>');
+  html = html.replace(/\[x\] (.*$)/gim, '<li class="task-list-item"><input type="checkbox" checked disabled> $1</li>');
+
+  // Line breaks
+  if (breaks) {
+    html = html.replace(/\n/g, '<br>\n');
+  }
+
+  // Paragraphs - wrap content that's not already wrapped
+  // Split by block-level elements and wrap
+  const blockElements = 'div|p|h[1-6]|blockquote|pre|table|ul|ol|li|hr|dl|dt|dd';
+  const blockRegex = new RegExp(`(<(?:${blockElements})[^>]*>.*?</(?:${blockElements})>|</?(?:${blockElements})[^>]*/?>)`, 'gis');
+
+  const parts = html.split(blockRegex);
+  html = parts.map(part => {
+    if (!part || !part.trim()) return '';
+    if (new RegExp(`^</?(?:${blockElements})`, 'i').test(part.trim())) {
+      return part;
+    }
+    return `<p>${part}</p>`;
+  }).join('\n');
+
+  // Clean up empty paragraphs
+  html = html.replace(/<p><\/p>/g, '');
+  html = html.replace(/<p>(<(pre|blockquote|table|ul|ol|div)[^>]*>.*?<\/\2>)<\/p>/gis, '$1');
+
+  // Emoji shortcuts
+  const emojiMap = {
+    ':)': '😊',
+    ':-)': '😊',
+    ':(': '😞',
+    ':-(': '😞',
+    ':D': '😃',
+    ':-D': '😃',
+    ';)' : '😉',
+    ';-)': '😉',
+    ':P': '😛',
+    ':-P': '😛',
+    ':+1': '👍',
+    ':-1': '👎',
+    ':fire:': '🔥',
+    ':rocket:': '🚀',
+    ':heart:': '❤️',
+    ':star:': '⭐'
+  };
+
+  for (const [shortcut, emoji] of Object.entries(emojiMap)) {
+    html = html.replace(new RegExp(escapeRegex(shortcut), 'g'), emoji);
+  }
 
   // Sanitize if enabled
   if (sanitize) {
     html = sanitizeHtml(html, whiteList);
   }
 
-  return html;
+  return html.trim();
 }
 
 /**
- * Parse markdown to HTML (async version with external highlighter)
+ * Escape special regex characters
+ * @param {string} string - String to escape
+ * @returns {string} Escaped string
+ */
+function escapeRegex(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Parse markdown to HTML (async version)
  * @param {string} markdown - Markdown content
  * @param {object} options - Parse options
  * @returns {Promise<string>} HTML content
  */
 async function parseAsync(markdown, options = {}) {
-  if (!markdown) return '';
-
-  const {
-    sanitize = true,
-    whiteList,
-    markdownOptions = {},
-    highlighter = null // External highlighter function
-  } = options;
-
-  // Create markdown-it instance
-  const mdOptions = { ...markdownOptions };
-  if (highlighter) {
-    mdOptions.highlight = highlighter;
-  }
-
-  const md = createMarkdownIt(mdOptions);
-
-  // Parse markdown
-  let html = md.render(markdown);
-
-  // Sanitize if enabled
-  if (sanitize) {
-    html = sanitizeHtml(html, whiteList);
-  }
-
-  return html;
+  return parse(markdown, options);
 }
 
 /**
@@ -405,21 +387,30 @@ async function parseAsync(markdown, options = {}) {
 function extractText(markdown) {
   if (!markdown) return '';
 
-  const md = createMarkdownIt({
-    emoji: false,
-    sub: false,
-    sup: false,
-    math: false,
-    highlight: false,
-    linkify: false
-  });
+  let text = markdown;
 
-  // Render to HTML then strip tags
-  const html = md.render(markdown);
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  // Remove code blocks
+  text = text.replace(/```[\s\S]*?```/g, '');
+
+  // Remove inline code
+  text = text.replace(/`[^`]*`/g, '');
+
+  // Remove images
+  text = text.replace(/!\[[^\]]*\]\([^)]*\)/g, '');
+
+  // Replace links with just the text
+  text = text.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+
+  // Remove HTML tags
+  text = text.replace(/<[^>]+>/g, '');
+
+  // Remove markdown syntax
+  text = text.replace(/[#*_~>|\-\[\]()^]/g, '');
+
+  // Normalize whitespace
+  text = text.replace(/\s+/g, ' ').trim();
+
+  return text;
 }
 
 /**
@@ -463,7 +454,7 @@ function truncate(markdown, length = 200, suffix = '...') {
   return text.substring(0, length) + suffix;
 }
 
-module.exports = {
+export {
   parse,
   parseAsync,
   extractText,
@@ -472,8 +463,5 @@ module.exports = {
   truncate,
   sanitizeHtml,
   escapeHtml,
-  createMarkdownIt,
-  DEFAULT_WHITE_LIST,
-  MATHJAX_CONFIG,
-  KATEX_CONFIG
+  DEFAULT_WHITE_LIST
 };

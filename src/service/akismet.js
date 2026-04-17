@@ -1,6 +1,7 @@
 /**
  * Akismet Spam Detection Service for Waline
  * Provides spam checking and key verification for comments
+ * EdgeOne Pages Functions compatible - uses fetch API only
  */
 
 const AKISMET_ENDPOINT = 'https://rest.akismet.com';
@@ -336,6 +337,8 @@ async function checkSpam(comment, config = {}) {
     // This is just a placeholder for the check
     const { max, window } = config.rateLimit;
     // Implementation would check against storage
+    void max;
+    void window;
   }
 
   // Check duplicate content
@@ -365,7 +368,7 @@ async function getStats(config) {
   };
 }
 
-module.exports = {
+export {
   AkismetClient,
   verifyKey,
   checkComment,

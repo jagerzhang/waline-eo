@@ -6,7 +6,7 @@ import { CommentAPI } from '../src/api/comment.js';
 import { UserAPI } from '../src/api/user.js';
 import { AdminAPI } from '../src/api/admin.js';
 import { NotifyService } from '../src/service/notify.js';
-import { MarkdownService } from '../src/service/markdown.js';
+import { MarkdownService } from '../src/service/markdown-simple.js';
 import { AkismetService } from '../src/service/akismet.js';
 import { AvatarService } from '../src/service/avatar.js';
 import { verify as verifyJWT, extractBearerToken } from '../src/utils/auth.js';

@@ -1,10 +1,8 @@
 /**
  * Waline User API Module
  * Implements all user-related features from official Waline
- * Compatible with EdgeOne/Cloudflare Workers environment
+ * Compatible with EdgeOne/Cloudflare Workers environment (Web Crypto API)
  */
-
-import { createHash, randomBytes } from 'crypto';
 
 /**
  * User types in Waline
@@ -25,7 +23,145 @@ export const UserRole = {
 };
 
 /**
- * JWT Token utilities
+ * Web Crypto utilities for EdgeOne Pages Functions compatibility
+ */
+class CryptoUtils {
+  /**
+   * Generate random bytes using Web Crypto API
+   * @param {number} length - Number of bytes
+   * @returns {Uint8Array} Random bytes
+   */
+  static getRandomBytes(length) {
+    return crypto.getRandomValues(new Uint8Array(length));
+  }
+
+  /**
+   * Generate random bytes as hex string
+   * @param {number} length - Number of bytes
+   * @returns {string} Hex string
+   */
+  static randomBytesHex(length) {
+    const bytes = CryptoUtils.getRandomBytes(length);
+    return Array.from(bytes)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+
+  /**
+   * Generate random bytes as base64 string
+   * @param {number} length - Number of bytes
+   * @returns {string} Base64 string
+   */
+  static randomBytesBase64(length) {
+    const bytes = CryptoUtils.getRandomBytes(length);
+    return CryptoUtils.arrayBufferToBase64(bytes);
+  }
+
+  /**
+   * Convert ArrayBuffer to Base64 string
+   * @param {ArrayBuffer|Uint8Array} buffer
+   * @returns {string}
+   */
+  static arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  /**
+   * Convert Base64 string to Uint8Array
+   * @param {string} base64
+   * @returns {Uint8Array}
+   */
+  static base64ToArrayBuffer(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  /**
+   * Convert string to Uint8Array
+   * @param {string} str
+   * @returns {Uint8Array}
+   */
+  static stringToBytes(str) {
+    return new TextEncoder().encode(str);
+  }
+
+  /**
+   * Convert Uint8Array to string
+   * @param {Uint8Array} bytes
+   * @returns {string}
+   */
+  static bytesToString(bytes) {
+    return new TextDecoder().decode(bytes);
+  }
+
+  /**
+   * Compute SHA-256 hash using Web Crypto API
+   * @param {string|Uint8Array} data - Data to hash
+   * @returns {Promise<Uint8Array>} Hash bytes
+   */
+  static async sha256(data) {
+    const bytes = typeof data === 'string' ? CryptoUtils.stringToBytes(data) : data;
+    const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
+    return new Uint8Array(hashBuffer);
+  }
+
+  /**
+   * Compute SHA-256 hash and return as hex string
+   * @param {string|Uint8Array} data - Data to hash
+   * @returns {Promise<string>} Hex string
+   */
+  static async sha256Hex(data) {
+    const hashBytes = await CryptoUtils.sha256(data);
+    return Array.from(hashBytes)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+
+  /**
+   * Compute HMAC-SHA256 using Web Crypto API
+   * @param {string|Uint8Array} key - Secret key
+   * @param {string|Uint8Array} data - Data to sign
+   * @returns {Promise<Uint8Array>} Signature bytes
+   */
+  static async hmacSha256(key, data) {
+    const keyBytes = typeof key === 'string' ? CryptoUtils.stringToBytes(key) : key;
+    const dataBytes = typeof data === 'string' ? CryptoUtils.stringToBytes(data) : data;
+
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw',
+      keyBytes,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+
+    const signature = await crypto.subtle.sign('HMAC', cryptoKey, dataBytes);
+    return new Uint8Array(signature);
+  }
+
+  /**
+   * Compute HMAC-SHA256 and return as base64url string
+   * @param {string|Uint8Array} key - Secret key
+   * @param {string|Uint8Array} data - Data to sign
+   * @returns {Promise<string>} Base64url string
+   */
+  static async hmacSha256Base64Url(key, data) {
+    const signature = await CryptoUtils.hmacSha256(key, data);
+    return CryptoUtils.base64UrlEncode(signature);
+  }
+}
+
+/**
+ * JWT Token utilities using Web Crypto API
  */
 class JWTUtils {
   /**
@@ -33,9 +169,9 @@ class JWTUtils {
    * @param {Object} payload - Token payload
    * @param {string} secret - JWT secret
    * @param {number} expiresIn - Token expiration in seconds
-   * @returns {string} JWT token
+   * @returns {Promise<string>} JWT token
    */
-  static sign(payload, secret, expiresIn = 86400) {
+  static async sign(payload, secret, expiresIn = 86400) {
     const header = {
       alg: 'HS256',
       typ: 'JWT'
@@ -50,7 +186,7 @@ class JWTUtils {
 
     const base64Header = JWTUtils.base64UrlEncode(JSON.stringify(header));
     const base64Payload = JWTUtils.base64UrlEncode(JSON.stringify(fullPayload));
-    const signature = JWTUtils.createSignature(base64Header, base64Payload, secret);
+    const signature = await JWTUtils.createSignature(base64Header, base64Payload, secret);
 
     return `${base64Header}.${base64Payload}.${signature}`;
   }
@@ -59,9 +195,9 @@ class JWTUtils {
    * Verify and decode a JWT token
    * @param {string} token - JWT token
    * @param {string} secret - JWT secret
-   * @returns {Object|null} Decoded payload or null if invalid
+   * @returns {Promise<Object|null>} Decoded payload or null if invalid
    */
-  static verify(token, secret) {
+  static async verify(token, secret) {
     try {
       const [header, payload, signature] = token.split('.');
 
@@ -70,7 +206,7 @@ class JWTUtils {
       }
 
       // Verify signature
-      const expectedSignature = JWTUtils.createSignature(header, payload, secret);
+      const expectedSignature = await JWTUtils.createSignature(header, payload, secret);
       if (signature !== expectedSignature) {
         return null;
       }
@@ -105,22 +241,20 @@ class JWTUtils {
   }
 
   /**
-   * Create HMAC-SHA256 signature
+   * Create HMAC-SHA256 signature using Web Crypto API
    */
-  static createSignature(header, payload, secret) {
+  static async createSignature(header, payload, secret) {
     const data = `${header}.${payload}`;
-    return JWTUtils.base64UrlEncode(
-      createHash('sha256').update(`${data}.${secret}`).digest()
-    );
+    return await CryptoUtils.hmacSha256Base64Url(secret, data);
   }
 
   /**
    * Base64 URL-safe encode
    */
   static base64UrlEncode(str) {
-    const buffer = Buffer.isBuffer(str) ? str : Buffer.from(str, 'utf8');
-    return buffer
-      .toString('base64')
+    const bytes = CryptoUtils.stringToBytes(str);
+    const base64 = CryptoUtils.arrayBufferToBase64(bytes);
+    return base64
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=/g, '');
@@ -136,33 +270,34 @@ class JWTUtils {
       str += '='.repeat(padding);
     }
     const base64 = str.replace(/-/g, '+').replace(/_/g, '/');
-    return Buffer.from(base64, 'base64').toString('utf8');
+    const binary = atob(base64);
+    return new TextDecoder().decode(
+      Uint8Array.from(binary, c => c.charCodeAt(0))
+    );
   }
 }
 
 /**
- * Password utilities
+ * Password utilities using Web Crypto API
  */
 class PasswordUtils {
   /**
    * Hash password using SHA256
    * @param {string} password - Plain text password
    * @param {string} salt - Optional salt
-   * @returns {string} Hashed password
+   * @returns {Promise<string>} Hashed password
    */
-  static hash(password, salt = '') {
-    const hash = createHash('sha256');
-    hash.update(password + salt);
-    return hash.digest('hex');
+  static async hash(password, salt = '') {
+    return await CryptoUtils.sha256Hex(password + salt);
   }
 
   /**
    * Generate a random salt
-   * @param {number} length - Salt length
-   * @returns {string} Random salt
+   * @param {number} length - Salt length in bytes
+   * @returns {string} Random salt as hex string
    */
   static generateSalt(length = 16) {
-    return randomBytes(length).toString('hex');
+    return CryptoUtils.randomBytesHex(length);
   }
 
   /**
@@ -170,10 +305,10 @@ class PasswordUtils {
    * @param {string} password - Plain text password
    * @param {string} hashedPassword - Stored hash
    * @param {string} salt - Salt used for hashing
-   * @returns {boolean} Whether password matches
+   * @returns {Promise<boolean>} Whether password matches
    */
-  static verify(password, hashedPassword, salt = '') {
-    const hash = PasswordUtils.hash(password, salt);
+  static async verify(password, hashedPassword, salt = '') {
+    const hash = await PasswordUtils.hash(password, salt);
     return hash === hashedPassword;
   }
 }
@@ -197,7 +332,7 @@ class EmailUtils {
    * @returns {string} Verification token
    */
   static generateVerificationToken() {
-    return randomBytes(32).toString('hex');
+    return CryptoUtils.randomBytesHex(32);
   }
 
   /**
@@ -212,31 +347,43 @@ class EmailUtils {
 }
 
 /**
- * 2FA utilities
+ * 2FA utilities using Web Crypto API
  */
 class TwoFAUtils {
   /**
    * Generate 2FA secret
-   * @returns {string} 2FA secret
+   * @returns {string} 2FA secret as base64
    */
   static generateSecret() {
-    return randomBytes(20).toString('base64');
+    return CryptoUtils.randomBytesBase64(20);
   }
 
   /**
-   * Generate TOTP code (simplified implementation)
+   * Generate TOTP code (simplified implementation using Web Crypto)
    * @param {string} secret - 2FA secret
    * @param {number} timeStep - Time step (default 30 seconds)
-   * @returns {string} 6-digit TOTP code
+   * @returns {Promise<string>} 6-digit TOTP code
    */
-  static generateTOTP(secret, timeStep = 30) {
+  static async generateTOTP(secret, timeStep = 30) {
     const time = Math.floor(Date.now() / 1000 / timeStep);
-    const timeBuffer = Buffer.alloc(8);
-    timeBuffer.writeBigUInt64BE(BigInt(time), 0);
 
-    const hmac = createHash('sha1');
-    hmac.update(secret + timeBuffer.toString());
-    const hash = hmac.digest();
+    // Create time buffer (8 bytes, big-endian)
+    const timeBuffer = new ArrayBuffer(8);
+    const view = new DataView(timeBuffer);
+    view.setBigUint64(0, BigInt(time), false);
+
+    // Create HMAC using Web Crypto
+    const secretBytes = CryptoUtils.stringToBytes(secret);
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw',
+      secretBytes,
+      { name: 'HMAC', hash: 'SHA-1' },
+      false,
+      ['sign']
+    );
+
+    const hmac = await crypto.subtle.sign('HMAC', cryptoKey, timeBuffer);
+    const hash = new Uint8Array(hmac);
 
     const offset = hash[hash.length - 1] & 0x0f;
     const code = ((hash[offset] & 0x7f) << 24 |
@@ -252,18 +399,30 @@ class TwoFAUtils {
    * @param {string} code - User provided code
    * @param {string} secret - 2FA secret
    * @param {number} window - Allowed time window (steps)
-   * @returns {boolean} Whether code is valid
+   * @returns {Promise<boolean>} Whether code is valid
    */
-  static verifyTOTP(code, secret, window = 1) {
+  static async verifyTOTP(code, secret, window = 1) {
     for (let i = -window; i <= window; i++) {
       const timeStep = 30;
       const time = Math.floor(Date.now() / 1000 / timeStep) + i;
-      const timeBuffer = Buffer.alloc(8);
-      timeBuffer.writeBigUInt64BE(BigInt(time), 0);
 
-      const hmac = createHash('sha1');
-      hmac.update(secret + timeBuffer.toString());
-      const hash = hmac.digest();
+      // Create time buffer (8 bytes, big-endian)
+      const timeBuffer = new ArrayBuffer(8);
+      const view = new DataView(timeBuffer);
+      view.setBigUint64(0, BigInt(time), false);
+
+      // Create HMAC using Web Crypto
+      const secretBytes = CryptoUtils.stringToBytes(secret);
+      const cryptoKey = await crypto.subtle.importKey(
+        'raw',
+        secretBytes,
+        { name: 'HMAC', hash: 'SHA-1' },
+        false,
+        ['sign']
+      );
+
+      const hmac = await crypto.subtle.sign('HMAC', cryptoKey, timeBuffer);
+      const hash = new Uint8Array(hmac);
 
       const offset = hash[hash.length - 1] & 0x0f;
       const expectedCode = ((hash[offset] & 0x7f) << 24 |
@@ -289,7 +448,7 @@ class OAuthUtils {
    * @returns {string} OAuth state
    */
   static generateState() {
-    return randomBytes(16).toString('hex');
+    return CryptoUtils.randomBytesHex(16);
   }
 }
 
@@ -310,6 +469,7 @@ export class UserAPI {
     this.db = options.db;
     this.jwtSecret = options.jwtSecret;
     this.oauth = options.oauth || {};
+    this.config = options.config || {};
     this.email = options.email || {};
     this.siteUrl = options.siteUrl || '';
     this.security = {
@@ -360,7 +520,7 @@ export class UserAPI {
   /**
    * Get current user from request
    * @param {Request} request - HTTP request
-   * @returns {Object|null} User object
+   * @returns {Promise<Object|null>} User object
    */
   async getCurrentUser(request) {
     const token = this.extractToken(request);
@@ -368,7 +528,7 @@ export class UserAPI {
       return null;
     }
 
-    const payload = JWTUtils.verify(token, this.jwtSecret);
+    const payload = await JWTUtils.verify(token, this.jwtSecret);
     if (!payload) {
       return null;
     }
@@ -468,7 +628,7 @@ export class UserAPI {
       }
 
       // Verify password
-      const isValidPassword = PasswordUtils.verify(password, user.password, user.salt || '');
+      const isValidPassword = await PasswordUtils.verify(password, user.password, user.salt || '');
 
       if (!isValidPassword) {
         // Increment failed attempts
@@ -500,7 +660,7 @@ export class UserAPI {
           );
         }
 
-        const isValid2FA = TwoFAUtils.verifyTOTP(twoFACode, user.twoFASecret);
+        const isValid2FA = await TwoFAUtils.verifyTOTP(twoFACode, user.twoFASecret);
         if (!isValid2FA) {
           return new Response(
             JSON.stringify(this.createError('Invalid 2FA code', 401)),
@@ -529,12 +689,12 @@ export class UserAPI {
       });
 
       // Generate tokens
-      const accessToken = this.generateAccessToken(user);
-      const refreshToken = this.generateRefreshToken(user);
+      const accessToken = await this.generateAccessToken(user);
+      const refreshToken = await this.generateRefreshToken(user);
 
       // Store refresh token
       await this.db.create('token', {
-        id: randomBytes(16).toString('hex'),
+        id: CryptoUtils.randomBytesHex(16),
         userId: user.id,
         token: refreshToken,
         type: 'refresh',
@@ -602,7 +762,7 @@ export class UserAPI {
 
       // Generate salt and hash password
       const salt = PasswordUtils.generateSalt();
-      const hashedPassword = PasswordUtils.hash(password, salt);
+      const hashedPassword = await PasswordUtils.hash(password, salt);
 
       // Generate verification token if required
       let verificationToken = null;
@@ -611,7 +771,7 @@ export class UserAPI {
       }
 
       // Create user
-      const userId = randomBytes(16).toString('hex');
+      const userId = CryptoUtils.randomBytesHex(16);
       const user = {
         id: userId,
         email: email.toLowerCase(),
@@ -640,12 +800,12 @@ export class UserAPI {
       }
 
       // Generate tokens
-      const accessToken = this.generateAccessToken(user);
-      const refreshToken = this.generateRefreshToken(user);
+      const accessToken = await this.generateAccessToken(user);
+      const refreshToken = await this.generateRefreshToken(user);
 
       // Store refresh token
       await this.db.create('token', {
-        id: randomBytes(16).toString('hex'),
+        id: CryptoUtils.randomBytesHex(16),
         userId: user.id,
         token: refreshToken,
         type: 'refresh',
@@ -720,13 +880,13 @@ export class UserAPI {
       }
 
       // Generate new tokens
-      const newAccessToken = this.generateAccessToken(user);
-      const newRefreshToken = this.generateRefreshToken(user);
+      const newAccessToken = await this.generateAccessToken(user);
+      const newRefreshToken = await this.generateRefreshToken(user);
 
       // Delete old refresh token and create new one
       await this.db.delete('token', storedToken.id);
       await this.db.create('token', {
-        id: randomBytes(16).toString('hex'),
+        id: CryptoUtils.randomBytesHex(16),
         userId: user.id,
         token: newRefreshToken,
         type: 'refresh',
@@ -775,7 +935,7 @@ export class UserAPI {
         const payload = JWTUtils.decode(token);
         if (payload) {
           await this.db.create('token', {
-            id: randomBytes(16).toString('hex'),
+            id: CryptoUtils.randomBytesHex(16),
             token: token,
             type: 'blacklist',
             expiresAt: new Date(payload.exp * 1000).toISOString(),
@@ -912,14 +1072,14 @@ export class UserAPI {
       const url = new URL(request.url);
       const provider = url.searchParams.get('type') || url.searchParams.get('provider') || 'github';
       const redirect = url.searchParams.get('redirect');
-      
+
       // Use official Waline OAuth proxy service (same as official)
       const oauthUrl = this.config.oauthUrl || 'https://oauth.lithub.cc';
       const serverURL = this.config.siteUrl || url.origin;
-      
+
       // Build redirect URL back to our callback
       const callbackUrl = `${serverURL}/oauth?${redirect ? `redirect=${encodeURIComponent(redirect)}&` : ''}type=${provider}`;
-      
+
       // Build OAuth proxy URL
       const authUrl = `${oauthUrl}/${provider}?${new URLSearchParams({
         redirect: callbackUrl,
@@ -965,11 +1125,11 @@ export class UserAPI {
 
       // Use official Waline OAuth proxy service (same as official)
       const oauthUrl = this.config.oauthUrl || 'https://oauth.lithub.cc';
-      
+
       // Build params for OAuth proxy
       const params = { code };
       if (state) params.state = state;
-      
+
       // Special handling for Facebook
       if (type === 'facebook') {
         const serverURL = this.config.siteUrl || url.origin;
@@ -1023,7 +1183,7 @@ export class UserAPI {
       let currentUser = null;
       if (state) {
         try {
-          const decoded = JWTUtils.verify(state, this.jwtSecret);
+          const decoded = await JWTUtils.verify(state, this.jwtSecret);
           if (decoded) {
             currentUser = await this.db.get('user', decoded.sub);
           }
@@ -1045,7 +1205,7 @@ export class UserAPI {
         // Link account
         if (!existingUser) {
           await this.db.create('oauth_link', {
-            id: randomBytes(16).toString('hex'),
+            id: CryptoUtils.randomBytesHex(16),
             userId: currentUser.id,
             provider: type,
             providerId: oauthUser.id,
@@ -1072,11 +1232,11 @@ export class UserAPI {
 
       // If social account already linked, login as that user
       if (existingUser) {
-        const accessToken = this.generateAccessToken(existingUser);
-        const refreshToken = this.generateRefreshToken(existingUser);
+        const accessToken = await this.generateAccessToken(existingUser);
+        const refreshToken = await this.generateRefreshToken(existingUser);
 
         await this.db.create('token', {
-          id: randomBytes(16).toString('hex'),
+          id: CryptoUtils.randomBytesHex(16),
           userId: existingUser.id,
           token: refreshToken,
           type: 'refresh',
@@ -1110,11 +1270,11 @@ export class UserAPI {
 
       // Check if email already exists
       const usersByEmail = await this.db.query('user', { email: oauthUser.email.toLowerCase() });
-      
+
       if (usersByEmail.length > 0) {
         // Link OAuth to existing user
         await this.db.create('oauth_link', {
-          id: randomBytes(16).toString('hex'),
+          id: CryptoUtils.randomBytesHex(16),
           userId: usersByEmail[0].id,
           provider: type,
           providerId: oauthUser.id,
@@ -1123,11 +1283,11 @@ export class UserAPI {
         });
 
         const user = usersByEmail[0];
-        const accessToken = this.generateAccessToken(user);
-        const refreshToken = this.generateRefreshToken(user);
+        const accessToken = await this.generateAccessToken(user);
+        const refreshToken = await this.generateRefreshToken(user);
 
         await this.db.create('token', {
-          id: randomBytes(16).toString('hex'),
+          id: CryptoUtils.randomBytesHex(16),
           userId: user.id,
           token: refreshToken,
           type: 'refresh',
@@ -1153,8 +1313,8 @@ export class UserAPI {
 
       // Create new user
       const userCount = await this.db.count('user');
-      const userId = randomBytes(16).toString('hex');
-      
+      const userId = CryptoUtils.randomBytesHex(16);
+
       const newUser = {
         id: userId,
         email: oauthUser.email.toLowerCase(),
@@ -1179,7 +1339,7 @@ export class UserAPI {
 
       // Create OAuth link
       await this.db.create('oauth_link', {
-        id: randomBytes(16).toString('hex'),
+        id: CryptoUtils.randomBytesHex(16),
         userId: newUser.id,
         provider: type,
         providerId: oauthUser.id,
@@ -1187,11 +1347,11 @@ export class UserAPI {
         createdAt: new Date().toISOString()
       });
 
-      const accessToken = this.generateAccessToken(newUser);
-      const refreshToken = this.generateRefreshToken(newUser);
+      const accessToken = await this.generateAccessToken(newUser);
+      const refreshToken = await this.generateRefreshToken(newUser);
 
       await this.db.create('token', {
-        id: randomBytes(16).toString('hex'),
+        id: CryptoUtils.randomBytesHex(16),
         userId: newUser.id,
         token: refreshToken,
         type: 'refresh',
@@ -1220,130 +1380,6 @@ export class UserAPI {
       );
     }
   }
-          return new Response(
-            JSON.stringify(this.createError(`Unsupported provider: ${provider}`, 400)),
-            { status: 400, headers: { 'Content-Type': 'application/json' } }
-          );
-      }
-
-      // Find or create user
-      let user = null;
-
-      // Try to find by OAuth ID
-      const oauthLinks = await this.db.query('oauth_link', {
-        provider: provider,
-        providerId: oauthUser.id
-      });
-
-      if (oauthLinks.length > 0) {
-        user = await this.db.get('user', oauthLinks[0].userId);
-      }
-
-      // Try to find by email
-      if (!user && oauthUser.email) {
-        const users = await this.db.query('user', { email: oauthUser.email.toLowerCase() });
-        if (users.length > 0) {
-          user = users[0];
-
-          // Link OAuth account
-          await this.db.create('oauth_link', {
-            id: randomBytes(16).toString('hex'),
-            userId: user.id,
-            provider: provider,
-            providerId: oauthUser.id,
-            providerData: JSON.stringify(oauthUser),
-            createdAt: new Date().toISOString()
-          });
-        }
-      }
-
-      // Create new user if not found
-      if (!user) {
-        if (!oauthUser.email) {
-          return new Response(
-            JSON.stringify(this.createError('Email required from OAuth provider', 400)),
-            { status: 400, headers: { 'Content-Type': 'application/json' } }
-          );
-        }
-
-        const userId = randomBytes(16).toString('hex');
-        user = {
-          id: userId,
-          email: oauthUser.email.toLowerCase(),
-          password: null, // OAuth users don't have password
-          salt: null,
-          nick: oauthUser.name || oauthUser.login,
-          url: oauthUser.url || '',
-          avatar: oauthUser.avatar || '',
-          type: UserType.USER,
-          role: UserRole.USER,
-          emailVerified: true, // OAuth emails are verified
-          verificationToken: null,
-          twoFAEnabled: false,
-          twoFASecret: null,
-          failedAttempts: 0,
-          lockedUntil: null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-
-        await this.db.create('user', user);
-
-        // Create OAuth link
-        await this.db.create('oauth_link', {
-          id: randomBytes(16).toString('hex'),
-          userId: user.id,
-          provider: provider,
-          providerId: oauthUser.id,
-          providerData: JSON.stringify(oauthUser),
-          createdAt: new Date().toISOString()
-        });
-      }
-
-      // Update last login
-      await this.db.update('user', user.id, {
-        lastLoginAt: new Date().toISOString()
-      });
-
-      // Generate tokens
-      const accessToken = this.generateAccessToken(user);
-      const refreshToken = this.generateRefreshToken(user);
-
-      // Store refresh token
-      await this.db.create('token', {
-        id: randomBytes(16).toString('hex'),
-        userId: user.id,
-        token: refreshToken,
-        type: 'refresh',
-        expiresAt: new Date(Date.now() + this.security.refreshTokenExpiresIn * 1000).toISOString(),
-        createdAt: new Date().toISOString()
-      });
-
-      // Redirect with tokens or return JSON
-      const redirectUrl = url.searchParams.get('redirect');
-      if (redirectUrl) {
-        const redirectWithToken = new URL(redirectUrl);
-        redirectWithToken.searchParams.set('token', accessToken);
-        redirectWithToken.searchParams.set('refreshToken', refreshToken);
-        return Response.redirect(redirectWithToken.toString(), 302);
-      }
-
-      return new Response(
-        JSON.stringify(this.createResponse({
-          user: this.sanitizeUser(user),
-          token: accessToken,
-          refreshToken: refreshToken,
-          expiresIn: this.security.tokenExpiresIn
-        })),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      );
-    } catch (error) {
-      return new Response(
-        JSON.stringify(this.createError(error.message, 500)),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-  }
 
   /**
    * ============================================================================
@@ -1354,9 +1390,9 @@ export class UserAPI {
   /**
    * Generate access token for user
    * @param {Object} user - User object
-   * @returns {string} JWT access token
+   * @returns {Promise<string>} JWT access token
    */
-  generateAccessToken(user) {
+  async generateAccessToken(user) {
     return JWTUtils.sign(
       {
         sub: user.id,
@@ -1372,9 +1408,9 @@ export class UserAPI {
   /**
    * Generate refresh token for user
    * @param {Object} user - User object
-   * @returns {string} JWT refresh token
+   * @returns {Promise<string>} JWT refresh token
    */
-  generateRefreshToken(user) {
+  async generateRefreshToken(user) {
     return JWTUtils.sign(
       {
         sub: user.id,
@@ -1519,7 +1555,7 @@ export class UserAPI {
 
       // Verify current password
       const fullUser = await this.db.get('user', user.id);
-      const isValid = PasswordUtils.verify(currentPassword, fullUser.password, fullUser.salt || '');
+      const isValid = await PasswordUtils.verify(currentPassword, fullUser.password, fullUser.salt || '');
 
       if (!isValid) {
         return new Response(
@@ -1530,7 +1566,7 @@ export class UserAPI {
 
       // Hash new password
       const salt = PasswordUtils.generateSalt();
-      const hashedPassword = PasswordUtils.hash(newPassword, salt);
+      const hashedPassword = await PasswordUtils.hash(newPassword, salt);
 
       await this.db.update('user', user.id, {
         password: hashedPassword,
@@ -1597,7 +1633,7 @@ export class UserAPI {
           );
         }
 
-        const isValid = TwoFAUtils.verifyTOTP(code, fullUser.twoFASecret);
+        const isValid = await TwoFAUtils.verifyTOTP(code, fullUser.twoFASecret);
         if (!isValid) {
           return new Response(
             JSON.stringify(this.createError('Invalid 2FA code', 400)),
@@ -1623,7 +1659,7 @@ export class UserAPI {
           );
         }
 
-        const isValid = TwoFAUtils.verifyTOTP(code, fullUser.twoFASecret);
+        const isValid = await TwoFAUtils.verifyTOTP(code, fullUser.twoFASecret);
         if (!isValid) {
           return new Response(
             JSON.stringify(this.createError('Invalid 2FA code', 400)),
@@ -1695,7 +1731,7 @@ export class UserAPI {
 
       // Hash new password
       const salt = PasswordUtils.generateSalt();
-      const hashedPassword = PasswordUtils.hash(newPassword, salt);
+      const hashedPassword = await PasswordUtils.hash(newPassword, salt);
 
       await this.db.update('user', user.id, {
         password: hashedPassword,

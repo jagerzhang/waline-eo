@@ -55,11 +55,106 @@
  * @property {Object} counts - Object mapping URLs to counts for batch request
  */
 
-import { createHash } from 'crypto';
-import { UAParser } from 'ua-parser-js';
+// EdgeOne Pages Functions compatible - no Node.js imports
+// Using Web Crypto API and simple UA parser instead of Node.js modules
 
 // Constants
 const IPQPS = 60; // Seconds between comments from same IP
+
+/**
+ * Generate MD5 hash using Web Crypto API
+ * @param {string} text - Text to hash
+ * @returns {Promise<string>} MD5 hash hex string
+ */
+async function md5Hash(text) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(text);
+  const hashBuffer = await crypto.subtle.digest('MD5', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Simple User Agent parser - extracts browser and OS info
+ * @param {string} ua - User agent string
+ * @returns {{browser: string, os: string}} Parsed browser and OS
+ */
+function simpleUAParser(ua) {
+  if (!ua) {
+    return { browser: '', os: '' };
+  }
+
+  let browserName = '';
+  let browserVersion = '';
+  let osName = '';
+  let osVersion = '';
+
+  // Browser detection
+  const browserPatterns = [
+    { name: 'Edge', regex: /Edg(?:e|A|iOS)?\/(\d+(\.\d+)?)/ },
+    { name: 'Chrome', regex: /Chrome\/(\d+(\.\d+)?)/ },
+    { name: 'Safari', regex: /Version\/(\d+(\.\d+)?).*Safari\/(\d+(\.\d+)?)/ },
+    { name: 'Firefox', regex: /Firefox\/(\d+(\.\d+)?)/ },
+    { name: 'Opera', regex: /(?:Opera|OPR)\/(\d+(\.\d+)?)/ },
+    { name: 'IE', regex: /(?:MSIE |Trident.*rv:)(\d+(\.\d+)?)/ }
+  ];
+
+  for (const pattern of browserPatterns) {
+    const match = ua.match(pattern.regex);
+    if (match) {
+      browserName = pattern.name;
+      browserVersion = match[1];
+      break;
+    }
+  }
+
+  // OS detection
+  const osPatterns = [
+    { name: 'Windows', regex: /Windows NT (\d+\.\d+)/ },
+    { name: 'macOS', regex: /Mac OS X (\d+[._]\d+([._]\d+)?)/ },
+    { name: 'iOS', regex: /(?:iPhone|iPad|iPod).*OS (\d+[._]\d+([._]\d+)?)/ },
+    { name: 'Android', regex: /Android (\d+(\.\d+)?)/ },
+    { name: 'Linux', regex: /Linux/ },
+    { name: 'Chrome OS', regex: /CrOS/ }
+  ];
+
+  for (const pattern of osPatterns) {
+    const match = ua.match(pattern.regex);
+    if (match) {
+      osName = pattern.name;
+      if (match[1]) {
+        osVersion = match[1].replace(/_/g, '.');
+        // Windows NT version mapping
+        if (osName === 'Windows') {
+          const ntVersion = parseFloat(osVersion);
+          if (ntVersion >= 10) {
+            osVersion = String(Math.floor(ntVersion));
+          } else if (ntVersion === 6.3) {
+            osVersion = '8.1';
+          } else if (ntVersion === 6.2) {
+            osVersion = '8';
+          } else if (ntVersion === 6.1) {
+            osVersion = '7';
+          } else if (ntVersion === 6.0) {
+            osVersion = 'Vista';
+          } else if (ntVersion === 5.2) {
+            osVersion = 'XP';
+          } else if (ntVersion === 5.1) {
+            osVersion = 'XP';
+          }
+        }
+      }
+      break;
+    }
+  }
+
+  return {
+    browser: browserName ? `${browserName} ${browserVersion}`.trim() : '',
+    os: osName ? `${osName} ${osVersion}`.trim() : ''
+  };
+}
+
+// Constants
 const LIKE_INC_MAX = 10; // Maximum random increment for likes
 const DEFAULT_LEVELS = [0, 10, 20, 50, 100, 200]; // Default level thresholds
 const DEFAULT_KEY = '70542d86693e'; // Default Akismet key
@@ -121,26 +216,7 @@ export class CommentAPI {
     }
 
     try {
-      const parser = new UAParser(ua);
-      const browser = parser.getBrowser();
-      const os = parser.getOS();
-
-      // Custom OS version mapping (e.g., NT 11.0 -> 11)
-      let osVersion = os.version || '';
-      if (os.name === 'Windows' && osVersion) {
-        const ntMatch = osVersion.match(/NT\s+(\d+\.\d+)/);
-        if (ntMatch) {
-          const ntVersion = parseFloat(ntMatch[1]);
-          if (ntVersion >= 10) {
-            osVersion = String(Math.floor(ntVersion));
-          }
-        }
-      }
-
-      return {
-        browser: browser.name ? `${browser.name} ${browser.version || ''}`.trim() : '',
-        os: os.name ? `${os.name} ${osVersion}`.trim() : ''
-      };
+      return simpleUAParser(ua);
     } catch (e) {
       return { browser: '', os: '' };
     }
@@ -178,14 +254,14 @@ export class CommentAPI {
    * @private
    * @param {string} mail - Email address
    * @param {string} [avatarProxy] - Avatar proxy URL
-   * @returns {string} Gravatar URL
+   * @returns {Promise<string>} Gravatar URL
    */
-  getAvatarUrl(mail, avatarProxy) {
+  async getAvatarUrl(mail, avatarProxy) {
     if (!mail) {
       return '';
     }
 
-    const hash = createHash('md5').update(mail.toLowerCase().trim()).digest('hex');
+    const hash = await md5Hash(mail.toLowerCase().trim());
     let url = `https://gravatar.com/avatar/${hash}?d=identicon`;
 
     if (avatarProxy && !url.includes(avatarProxy)) {
@@ -316,11 +392,14 @@ export class CommentAPI {
     // Render markdown
     const commentHtml = await this.renderMarkdown(comment.comment);
 
+    // Hash the email for privacy (using Web Crypto API)
+    const mailHash = comment.mail ? await md5Hash(comment.mail.toLowerCase().trim()) : '';
+
     // Build formatted comment
     const formatted = {
       objectId: comment.objectId || comment.id,
       nick: comment.nick,
-      mail: comment.mail ? createHash('md5').update(comment.mail.toLowerCase().trim()).digest('hex') : '',
+      mail: mailHash,
       link: comment.link || '',
       ua: comment.ua || '',
       comment: commentHtml,
@@ -337,7 +416,7 @@ export class CommentAPI {
       addr,
       insertedAt: comment.insertedAt || comment.createdAt,
       updatedAt: comment.updatedAt,
-      avatar: this.getAvatarUrl(comment.mail, avatarProxy),
+      avatar: await this.getAvatarUrl(comment.mail, avatarProxy),
       children: []
     };
 
@@ -348,7 +427,7 @@ export class CommentAPI {
         nick: comment.user.nick || comment.user.display_name,
         mail: comment.user.mail,
         link: comment.user.link,
-        avatar: comment.user.avatar || this.getAvatarUrl(comment.user.mail, avatarProxy),
+        avatar: comment.user.avatar || await this.getAvatarUrl(comment.user.mail, avatarProxy),
         type: comment.user.type,
         level: this.getLevel(comment.user.commentCount || 0)
       };

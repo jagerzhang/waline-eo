@@ -4,7 +4,58 @@
  * @module api/admin
  */
 
-import { createHash, randomBytes } from 'crypto';
+// Web Crypto API helpers for EdgeOne Pages Functions (V8 runtime)
+
+/**
+ * Generate a random ID using Web Crypto API
+ * @param {number} length - Length of the ID in bytes (default: 16)
+ * @returns {string} Hex-encoded random string
+ */
+async function generateRandomId(length = 16) {
+  const array = new Uint8Array(length);
+  crypto.getRandomValues(array);
+  return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Generate MD5 hash using Web Crypto API
+ * @param {string} data - Data to hash
+ * @returns {Promise<string>} Hex-encoded MD5 hash
+ */
+async function md5Hash(data) {
+  const encoder = new TextEncoder();
+  const dataBuffer = encoder.encode(data);
+  const hashBuffer = await crypto.subtle.digest('MD5', dataBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Generate SHA-256 hash using Web Crypto API
+ * @param {string} data - Data to hash
+ * @returns {Promise<string>} Hex-encoded SHA-256 hash
+ */
+async function sha256Hash(data) {
+  const encoder = new TextEncoder();
+  const dataBuffer = encoder.encode(data);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Convert ArrayBuffer to Base64 string using Web standard API
+ * @param {ArrayBuffer} buffer - ArrayBuffer to convert
+ * @returns {string} Base64 encoded string
+ */
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 
 /**
  * @typedef {Object} AdminComment
@@ -1011,7 +1062,7 @@ export class AdminAPI {
           // Create new comment
           await this.getModel().create({
             ...comment,
-            objectId: comment.objectId || this.generateId(),
+            objectId: comment.objectId || await this.generateId(),
             insertedAt: comment.insertedAt || new Date().toISOString(),
             updatedAt: new Date().toISOString()
           });
@@ -1044,7 +1095,7 @@ export class AdminAPI {
           // Create new user
           await this.storage.create({
             ...user,
-            objectId: user.objectId || this.generateId(),
+            objectId: user.objectId || await this.generateId(),
             createdAt: user.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString()
           }, 'user');
@@ -1077,7 +1128,7 @@ export class AdminAPI {
           // Create new counter
           await this.storage.create({
             ...counter,
-            objectId: counter.objectId || this.generateId(),
+            objectId: counter.objectId || await this.generateId(),
             updatedAt: new Date().toISOString()
           }, 'counter');
           result.imported.counters++;
@@ -1131,8 +1182,8 @@ export class AdminAPI {
 
     // Generate unique filename
     const ext = this.getFileExtension(file.name);
-    const hash = createHash('md5').update(`${file.name}${Date.now()}`).digest('hex').substring(0, 16);
-    const filename = `${hash}.${ext}`;
+    const hash = await md5Hash(`${file.name}${Date.now()}`);
+    const filename = `${hash.substring(0, 16)}.${ext}`;
 
     let url;
 
@@ -1243,7 +1294,7 @@ export class AdminAPI {
     }
 
     const arrayBuffer = await file.arrayBuffer();
-    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    const base64 = arrayBufferToBase64(arrayBuffer);
 
     await this.storage.setKV?.(`upload:${filename}`, JSON.stringify({
       data: base64,
@@ -1267,7 +1318,7 @@ export class AdminAPI {
   async uploadToLocal(file, filename) {
     // For EdgeOne/Workers, we might store in KV or return a data URL
     const arrayBuffer = await file.arrayBuffer();
-    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    const base64 = arrayBufferToBase64(arrayBuffer);
 
     // Store metadata
     await this.storage.setKV?.(`upload:${filename}`, JSON.stringify({
@@ -1287,13 +1338,13 @@ export class AdminAPI {
    * @param {string} filename - Filename
    * @param {string} contentType - Content type
    * @param {string} secretKey - Secret key
-   * @returns {string} Signature
+   * @returns {Promise<string>} Signature
    */
-  signR2Request(filename, contentType, secretKey) {
+  async signR2Request(filename, contentType, secretKey) {
     // Simplified signing - implement proper AWS Signature Version 4 for production
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const stringToSign = `PUT\n\n${contentType}\n${date}\n/${filename}`;
-    return createHash('sha256').update(stringToSign + secretKey).digest('hex');
+    return await sha256Hash(stringToSign + secretKey);
   }
 
   /**
@@ -1378,10 +1429,10 @@ export class AdminAPI {
   /**
    * Generate unique ID
    * @private
-   * @returns {string} Unique ID
+   * @returns {Promise<string>} Unique ID
    */
-  generateId() {
-    return randomBytes(16).toString('hex');
+  async generateId() {
+    return await generateRandomId(16);
   }
 
   /**
