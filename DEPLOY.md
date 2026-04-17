@@ -4,24 +4,18 @@
 
 ```
 waline-edgeone-full/
-├── functions/              # EdgeOne Pages Functions
+├── edge-functions/         # EdgeOne Pages Edge Functions（必需）
+│   ├── meta.json          # 元数据文件（必需）
 │   ├── index.js           # 根路径重定向到 /ui
 │   ├── ui.js              # 管理后台 UI
-│   └── api/               # API 端点
-│       ├── register.js    # 用户注册
-│       ├── token.js       # 登录/Token 管理
-│       └── comment.js     # 评论 API
+│   ├── register.js        # 用户注册
+│   ├── token.js           # 登录/Token 管理
+│   └── comment.js         # 评论 API
 ├── src/                   # 源代码（供参考）
-├── _routes.json           # 路由配置
-└── edge-functions/        # EdgeOne Edge Functions（备用）
+└── _routes.json           # 路由配置
 ```
 
-**注意**: EdgeOne Pages Functions 的路由是基于文件路径的：
-- `functions/api/register.js` → `/api/register`
-- `functions/comment.js` → `/comment`
-- `functions/ui.js` → `/ui`
-
-但我们的前端直接请求 `/register`（没有 `/api` 前缀），所以我们需要把 API 文件放在 functions 根目录！
+**重要**：EdgeOne Pages 使用 `edge-functions` 目录（不是 `functions`），并且需要 `meta.json` 文件。
 
 ## 部署步骤
 
