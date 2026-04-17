@@ -342,6 +342,208 @@ export class WalineKV {
     await this.kv.put(statusKey, JSON.stringify(comments));
   }
 
+  // ===== Generic CRUD Operations (for API compatibility) =====
+
+  /**
+   * Create a record in the specified table
+   * @param {string} table - Table name (user, comment, etc.)
+   * @param {Object} data - Data to create
+   * @returns {Promise<Object>}
+   */
+  async create(table, data) {
+    switch (table) {
+      case 'user':
+        return this.createUser(data);
+      case 'comment':
+        return this.createComment(data);
+      default:
+        const id = data.objectId || data.id || this.generateId();
+        const record = {
+          objectId: id,
+          id,
+          ...data,
+          createdAt: data.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await this.kv.put(this.prefix[table] + id, JSON.stringify(record));
+        return record;
+    }
+  }
+
+  /**
+   * Query records from the specified table
+   * @param {string} table - Table name
+   * @param {Object} where - Query conditions
+   * @param {Object} options - Query options (limit, offset, etc.)
+   * @returns {Promise<Array>}
+   */
+  async query(table, where = {}, options = {}) {
+    const { limit = 100, offset = 0 } = options;
+    
+    switch (table) {
+      case 'user': {
+        const { data: users } = await this.getAllUsers({ limit: 10000 });
+        return users.filter(user => {
+          for (const [key, value] of Object.entries(where)) {
+            if (user[key] !== value && user[key]?.toLowerCase?.() !== value?.toLowerCase?.()) {
+              return false;
+            }
+          }
+          return true;
+        }).slice(offset, offset + limit);
+      }
+      case 'comment': {
+        const { data: comments } = await this.getAllComments({ limit: 10000 });
+        return comments.filter(comment => {
+          for (const [key, value] of Object.entries(where)) {
+            if (comment[key] !== value) {
+              return false;
+            }
+          }
+          return true;
+        }).slice(offset, offset + limit);
+      }
+      default: {
+        const { keys } = await this.kv.list({ prefix: this.prefix[table] || table + ':' });
+        const records = [];
+        for (const key of keys) {
+          const data = await this.kv.get(key.name);
+          if (data) {
+            const record = JSON.parse(data);
+            let match = true;
+            for (const [k, v] of Object.entries(where)) {
+              if (record[k] !== v) {
+                match = false;
+                break;
+              }
+            }
+            if (match) records.push(record);
+          }
+        }
+        return records.slice(offset, offset + limit);
+      }
+    }
+  }
+
+  /**
+   * Get a single record by ID
+   * @param {string} table - Table name
+   * @param {string} id - Record ID
+   * @returns {Promise<Object|null>}
+   */
+  async get(table, id) {
+    switch (table) {
+      case 'user':
+        return this.getUser(id);
+      case 'comment':
+        return this.getComment(id);
+      default:
+        const data = await this.kv.get((this.prefix[table] || table + ':') + id);
+        return data ? JSON.parse(data) : null;
+    }
+  }
+
+  /**
+   * Update a record
+   * @param {string} table - Table name
+   * @param {string} id - Record ID
+   * @param {Object} updates - Data to update
+   * @returns {Promise<Object|null>}
+   */
+  async update(table, id, updates) {
+    switch (table) {
+      case 'user':
+        return this.updateUser(id, updates);
+      case 'comment':
+        return this.updateComment(id, updates);
+      default: {
+        const prefix = this.prefix[table] || table + ':';
+        const data = await this.kv.get(prefix + id);
+        if (!data) return null;
+        const record = JSON.parse(data);
+        const updated = {
+          ...record,
+          ...updates,
+          updatedAt: new Date().toISOString(),
+        };
+        await this.kv.put(prefix + id, JSON.stringify(updated));
+        return updated;
+      }
+    }
+  }
+
+  /**
+   * Delete a record
+   * @param {string} table - Table name
+   * @param {string} id - Record ID
+   * @returns {Promise<boolean>}
+   */
+  async delete(table, id) {
+    switch (table) {
+      case 'user':
+        return this.deleteUser(id);
+      case 'comment':
+        return this.deleteComment(id);
+      default: {
+        const prefix = this.prefix[table] || table + ':';
+        await this.kv.delete(prefix + id);
+        return true;
+      }
+    }
+  }
+
+  /**
+   * Count records in a table
+   * @param {string} table - Table name
+   * @param {Object} where - Filter conditions
+   * @returns {Promise<number>}
+   */
+  async count(table, where = {}) {
+    const records = await this.query(table, where, { limit: 100000 });
+    return records.length;
+  }
+
+  /**
+   * List all records from a table
+   * @param {string} table - Table name
+   * @param {Object} options - List options
+   * @returns {Promise<Array>}
+   */
+  async list(table, options = {}) {
+    const { limit = 100, offset = 0 } = options;
+    
+    switch (table) {
+      case 'user': {
+        const { data } = await this.getAllUsers({ limit, offset });
+        return data;
+      }
+      case 'comment': {
+        const { data } = await this.getAllComments({ limit, offset });
+        return data;
+      }
+      default: {
+        const prefix = this.prefix[table] || table + ':';
+        const { keys } = await this.kv.list({ prefix });
+        const records = [];
+        for (const key of keys) {
+          const data = await this.kv.get(key.name);
+          if (data) records.push(JSON.parse(data));
+        }
+        return records.slice(offset, offset + limit);
+      }
+    }
+  }
+
+  /**
+   * Put a value directly (key-value store)
+   * @param {string} key - Key
+   * @param {string} value - Value
+   * @returns {Promise<void>}
+   */
+  async put(key, value) {
+    await this.kv.put(key, value);
+  }
+
   // ===== Statistics =====
 
   async getStats() {

@@ -8,29 +8,20 @@ waline-edgeone-full/
 │   ├── index.js           # 根路径重定向到 /ui
 │   ├── ui.js              # 管理后台 UI
 │   └── api/               # API 端点
-│       ├── health.js      # 健康检查
-│       ├── version.js     # 版本信息
 │       ├── register.js    # 用户注册
 │       ├── token.js       # 登录/Token 管理
-│       ├── comment.js     # 评论 API
-│       ├── user.js        # 用户 API
-│       ├── article.js     # 文章统计
-│       ├── count.js       # 评论计数
-│       ├── recent.js      # 最新评论
-│       ├── hot.js         # 热门评论
-│       ├── stat.js        # 统计数据
-│       ├── reaction.js    # 文章反应
-│       └── admin/         # 管理后台 API
-│           ├── comment.js
-│           ├── user.js
-│           └── config.js
-├── src/                   # 源代码
-│   ├── api/              # API 逻辑
-│   ├── service/          # 服务层
-│   ├── ui/               # UI 层
-│   └── utils/            # 工具函数
-└── _routes.json          # 路由配置
+│       └── comment.js     # 评论 API
+├── src/                   # 源代码（供参考）
+├── _routes.json           # 路由配置
+└── edge-functions/        # EdgeOne Edge Functions（备用）
 ```
+
+**注意**: EdgeOne Pages Functions 的路由是基于文件路径的：
+- `functions/api/register.js` → `/api/register`
+- `functions/comment.js` → `/comment`
+- `functions/ui.js` → `/ui`
+
+但我们的前端直接请求 `/register`（没有 `/api` 前缀），所以我们需要把 API 文件放在 functions 根目录！
 
 ## 部署步骤
 
@@ -87,6 +78,8 @@ git push -u origin main
    - KV 命名空间：选择 `waline-kv`
 4. 点击 **保存**
 
+> **重要**: 变量名必须是 `WALINE_KV`，代码中通过 `env.WALINE_KV` 访问。
+
 ### 5. 配置环境变量
 
 在 **设置** → **变量** 页面，添加以下环境变量：
@@ -95,11 +88,11 @@ git push -u origin main
 
 | 变量名 | 值 | 说明 |
 |-------|-----|------|
-| `JWT_TOKEN` | 随机字符串 | 用于 JWT 签名，生成：`openssl rand -base64 32` |
+| `JWT_TOKEN` | 随机字符串 | 用于 JWT 签名，建议 32+ 字符 |
 | `SITE_NAME` | 站点名称 | 如：My Blog |
 | `SITE_URL` | 站点 URL | 如：https://your-site.com |
 
-> **注意**：第一个注册的用户将自动成为管理员，无需预设管理员密码。
+> **注意**: 第一个注册的用户将自动成为管理员，无需预设管理员密码。
 
 #### 可选变量
 
@@ -217,23 +210,35 @@ EdgeOne 会自动重新部署。
 
 ## 故障排查
 
-### 部署失败
-- 检查 `functions/index.js` 是否存在
-- 检查依赖是否正确安装
+### Error return from script
+这是最常见的错误，通常由以下原因引起：
+- Functions 文件使用了 `import` 语句导入外部模块
+- 代码中有语法错误
+- 使用了 EdgeOne 不支持的 API
 
-### KV 错误
+**解决方法**：
+1. 确保所有 Functions 文件都是自包含的（无 import 语句）
+2. 检查文件结构是否正确（见上方项目结构）
+3. 查看 EdgeOne Pages 的实时日志
+
+### 注册返回 404
+- 检查文件是否放在 `functions/` 根目录（不是 `functions/api/`）
+- EdgeOne Pages 的路由是基于文件路径的：`functions/register.js` → `/register`
+
+### KV 存储错误
 - 检查 KV 命名空间是否正确绑定
 - 检查变量名是否为 `WALINE_KV`
+- 确认 KV 命名空间 ID 正确
 
 ### 登录失败
 - 检查 `JWT_TOKEN` 是否设置
 - 检查邮箱和密码是否正确
 - 第一个注册的用户自动成为管理员
 
-### 注册返回 XML 错误
-- 检查 Functions 文件是否正确部署
-- 检查 `_routes.json` 是否存在
-- 查看 EdgeOne Pages 的实时日志
+### 注册失败
+- 检查邮箱格式是否正确
+- 密码至少需要 6 个字符
+- 查看 EdgeOne Pages 的实时日志获取详细错误信息
 
 ### 邮件发送失败
 - 检查 SMTP 配置
