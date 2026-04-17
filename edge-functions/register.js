@@ -11,6 +11,35 @@ export default async function onRequest(context) {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
+  // Debug: check WALINE_KV directly
+  if (request.url.includes('?debug=1')) {
+    const kvInfo = {
+      envExists: !!env,
+      envType: typeof env,
+      walineKvExists: env && 'WALINE_KV' in env,
+      walineKvType: env && env.WALINE_KV ? typeof env.WALINE_KV : 'undefined',
+      walineKvValue: env && env.WALINE_KV ? String(env.WALINE_KV) : null,
+      walineKvKeys: env && env.WALINE_KV && typeof env.WALINE_KV === 'object' 
+        ? Object.keys(env.WALINE_KV) : null,
+      hasGet: env && env.WALINE_KV && typeof env.WALINE_KV.get === 'function',
+      hasPut: env && env.WALINE_KV && typeof env.WALINE_KV.put === 'function',
+    };
+    
+    // Try to call get if it exists
+    if (env && env.WALINE_KV && typeof env.WALINE_KV.get === 'function') {
+      try {
+        const test = await env.WALINE_KV.get('test');
+        kvInfo.testResult = test;
+      } catch (e) {
+        kvInfo.testError = e.message;
+      }
+    }
+    
+    return new Response(JSON.stringify(kvInfo, null, 2), {
+      status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders }
+    });
+  }
+
   if (request.method !== 'POST') {
     return new Response(JSON.stringify({ errno: 405, errmsg: 'Method Not Allowed' }), {
       status: 405, headers: { 'Content-Type': 'application/json', ...corsHeaders }
@@ -18,41 +47,18 @@ export default async function onRequest(context) {
   }
 
   try {
-    // Debug: check env
-    if (!env) {
-      return new Response(JSON.stringify({ errno: 500, errmsg: 'env is undefined' }), {
-        status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders }
-      });
-    }
-
-    // Check available env vars
-    const envVars = Object.keys(env);
-    
-    // Find KV binding (could be WALINE_KV or something else)
-    let kv = null;
-    let kvName = null;
-    
-    for (const key of envVars) {
-      const val = env[key];
-      if (val && typeof val === 'object') {
-        // Check if it looks like a KV namespace
-        if (typeof val.get === 'function' || typeof val.put === 'function') {
-          kv = val;
-          kvName = key;
-          break;
-        }
-      }
-    }
-
-    if (!kv) {
+    if (!env || !env.WALINE_KV) {
       return new Response(JSON.stringify({ 
         errno: 500, 
-        errmsg: 'No KV namespace found',
-        envVars: envVars
+        errmsg: 'WALINE_KV not found',
+        env: !!env,
+        keys: env ? Object.keys(env) : null
       }), {
         status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
     }
+
+    const kv = env.WALINE_KV;
 
     const body = await request.json();
     const { email, password, nick } = body;
@@ -95,8 +101,7 @@ export default async function onRequest(context) {
 
     return new Response(JSON.stringify({
       errno: 0,
-      data: { id: userId, email: user.email, nick: user.nick },
-      kvUsed: kvName
+      data: { id: userId, email: user.email, nick: user.nick }
     }), { status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders }});
 
   } catch (err) {
