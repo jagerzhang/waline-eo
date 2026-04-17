@@ -1,11 +1,5 @@
-/**
- * Waline EdgeOne - Full Featured Edition
- * Compatible with @waline/client v3.x
- * Based on @waline/vercel v1.39.3
- * 
- * This is a complete reimplementation of Waline server for EdgeOne Pages
- * using EdgeOne KV as the data storage layer.
- */
+// EdgeOne Pages Functions Entry Point
+// Waline EdgeOne - Full Featured
 
 import { WalineKV } from '../src/kv.js';
 import { CommentAPI } from '../src/api/comment.js';
@@ -42,6 +36,7 @@ const getConfig = (env) => ({
   disableRegion: env.DISABLE_REGION === 'true',
   ipQPS: parseInt(env.IP_QPS) || 60,
   likeIncMax: parseInt(env.LIKE_INC_MAX) || 10,
+  oauthUrl: env.OAUTH_URL || 'https://oauth.lithub.cc',
   smtp: {
     host: env.SMTP_HOST,
     port: parseInt(env.SMTP_PORT) || 465,
@@ -54,97 +49,91 @@ const getConfig = (env) => ({
     key: env.AKISMET_KEY,
     site: env.SITE_URL,
   },
-  oauth: {
-    github: {
-      clientId: env.GITHUB_CLIENT_ID,
-      clientSecret: env.GITHUB_CLIENT_SECRET,
-    },
-  },
 });
 
 // Main Handler
-export default {
-  async fetch(request, env, ctx) {
-    // Handle CORS preflight
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders });
-    }
-
-    const url = new URL(request.url);
-    const path = url.pathname;
-    const method = request.method;
-
-    // Initialize configuration
-    const config = getConfig(env);
-
-    // Initialize services
-    const db = new WalineKV(env.WALINE_KV);
-    const markdown = new MarkdownService(env);
-    const notify = new NotifyService(env, config);
-    const akismet = new AkismetService(config.akismet);
-    const avatar = new AvatarService(config);
-
-    // Initialize APIs
-    const commentAPI = new CommentAPI(db, config, markdown, notify, akismet, avatar);
-    const userAPI = new UserAPI(db, config, notify);
-    const adminAPI = new AdminAPI(db, config);
-
-    // Build context
-    const ctx = {
-      request,
-      url,
-      path,
-      method,
-      config,
-      db,
-      userInfo: null,
-      isAdmin: false,
-    };
-
-    // Authenticate user if token provided
-    try {
-      const token = extractBearerToken(request);
-      if (token && config.jwtSecret) {
-        const decoded = await verifyJWT(token, config.jwtSecret);
-        if (decoded) {
-          ctx.userInfo = decoded;
-          ctx.isAdmin = decoded.type === 'administrator';
-        }
-      }
-    } catch (e) {
-      // Invalid token, continue as guest
-    }
-
-    try {
-      // Route matching
-      const route = matchRoute(path, method);
-      
-      if (!route) {
-        // Admin UI
-        if (path === '/ui' || path === '/ui/' || path === '/') {
-          return adminUI(request);
-        }
-        return jsonResponse({ errno: 404, errmsg: 'Not Found' }, 404);
-      }
-
-      // Execute handler
-      const result = await route.handler(ctx, { commentAPI, userAPI, adminAPI });
-
-      if (result instanceof Response) {
-        return result;
-      }
-
-      return jsonResponse(result.data || result, result.status || 200);
-
-    } catch (error) {
-      console.error('Error:', error);
-      return jsonResponse(
-        { errno: 500, errmsg: error.message || 'Internal Server Error' },
-        500
-      );
-    }
+export async function onRequest(context) {
+  const { request, env } = context;
+  
+  // Handle CORS preflight
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
-};
+
+  const url = new URL(request.url);
+  const path = url.pathname;
+
+  // Initialize configuration
+  const config = getConfig(env);
+
+  // Initialize services
+  const db = new WalineKV(env.WALINE_KV);
+  const markdown = new MarkdownService(env);
+  const notify = new NotifyService(env, config);
+  const akismet = new AkismetService(config.akismet);
+  const avatar = new AvatarService(config);
+
+  // Initialize APIs
+  const commentAPI = new CommentAPI(db, config, markdown, notify, akismet, avatar);
+  const userAPI = new UserAPI(db, config, notify);
+  const adminAPI = new AdminAPI(db, config);
+
+  // Build context
+  const ctx = {
+    request,
+    url,
+    path,
+    method: request.method,
+    config,
+    db,
+    userInfo: null,
+    isAdmin: false,
+  };
+
+  // Authenticate user if token provided
+  try {
+    const token = extractBearerToken(request);
+    if (token && config.jwtSecret) {
+      const decoded = await verifyJWT(token, config.jwtSecret);
+      if (decoded) {
+        ctx.userInfo = decoded;
+        ctx.isAdmin = decoded.type === 'administrator';
+      }
+    }
+  } catch (e) {
+    // Invalid token, continue as guest
+  }
+
+  try {
+    // Admin UI
+    if (path === '/ui' || path === '/ui/' || path === '/') {
+      return adminUI(request);
+    }
+
+    // Route matching
+    const route = matchRoute(path, request.method);
+    
+    if (!route) {
+      return jsonResponse({ errno: 404, errmsg: 'Not Found' }, 404);
+    }
+
+    // Execute handler
+    const result = await route.handler(ctx, { commentAPI, userAPI, adminAPI });
+
+    if (result instanceof Response) {
+      return result;
+    }
+
+    return jsonResponse(result.data || result, result.status || 200);
+
+  } catch (error) {
+    console.error('Error:', error);
+    return jsonResponse(
+      { errno: 500, errmsg: error.message || 'Internal Server Error' },
+      500
+    );
+  }
+}
 
 // Route Matcher
 function matchRoute(path, method) {
@@ -207,7 +196,7 @@ function matchRoute(path, method) {
   let route = routes.find(r => r.path === path && r.method === method);
   if (route) return route;
 
-  // Pattern match for /comment/:id style routes
+  // Pattern match
   route = routes.find(r => {
     if (r.method !== method) return false;
     if (path.startsWith(r.path + '/')) return true;
