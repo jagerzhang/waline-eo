@@ -22,6 +22,7 @@ import {
   updateCounter,
   getCommentById,
   getUserById,
+  getCounterById,
   getCounterByUrl,
 } from '../db/kv-store.js';
 
@@ -195,7 +196,6 @@ dbRoutes.put('/', async (c) => {
   if (table === 'Comment') {
     await updateComment(id, data);
   } else if (table === 'Counter') {
-    const { getCounterById } = await import('../db/kv-store.js');
     const counter = await getCounterById(id);
     if (counter) {
       for (const [k, v] of Object.entries(data)) {

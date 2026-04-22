@@ -50,7 +50,7 @@ app.onError((err, c) => {
     return c.json({ errno: 1, errmsg: 'Invalid JSON body' }, 400);
   }
   console.error('[Unhandled Error]', err?.message || err);
-  return c.json({ errno: 1, errmsg: 'Internal Server Error' }, 500);
+  return c.json({ errno: 1, errmsg: err?.message || 'Internal Server Error' }, 500);
 });
 
 // Routes

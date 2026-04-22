@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
-import { signJwt } from '../middleware/auth.js';
+import { signJwt, verifyJwt } from '../middleware/auth.js';
 import {
   getUserByEmail,
   getUserBySocial,
@@ -72,22 +72,46 @@ oauthRoutes.get('/', async (c) => {
       return c.redirect(`${redirect}?error=oauth_no_id`);
     }
 
-    // Try to find existing user by social link
     const socialField = getSocialField(type);
-    let user: Record<string, unknown> | null = null;
 
-    if (socialField) {
-      user = await getUserBySocial(socialField, socialId);
+    // Check if user is already logged in (binding from profile page)
+    let currentUserId: number | null = null;
+    if (state && c.env.JWT_SECRET) {
+      try {
+        const payload = await verifyJwt(state, c.env.JWT_SECRET);
+        if (payload?.id) currentUserId = payload.id;
+      } catch {
+        // Invalid state token, ignore
+      }
     }
 
-    // If not found by social, try by email
-    if (!user && socialEmail) {
-      user = await getUserByEmail(socialEmail);
+    let user: Record<string, unknown> | null = null;
 
-      // Link social account
-      if (user && socialField) {
-        await updateUser(user.id as number, { [socialField]: socialId });
-        user = await getUserById(user.id as number);
+    // If logged in, bind social account to current user
+    if (currentUserId && socialField) {
+      const currentUser = await getUserById(currentUserId);
+      if (currentUser) {
+        // Check if this social account is already linked to another user
+        const existingSocialUser = await getUserBySocial(socialField, socialId);
+        if (existingSocialUser && existingSocialUser.id !== currentUserId) {
+          return c.redirect(`${redirect}?error=social_already_linked`);
+        }
+        await updateUser(currentUserId, { [socialField]: socialId });
+        user = await getUserById(currentUserId);
+      }
+    }
+
+    // If not binding mode, try to find existing user by social or email
+    if (!user) {
+      if (socialField) {
+        user = await getUserBySocial(socialField, socialId);
+      }
+      if (!user && socialEmail) {
+        user = await getUserByEmail(socialEmail);
+        if (user && socialField) {
+          await updateUser(user.id as number, { [socialField]: socialId });
+          user = await getUserById(user.id as number);
+        }
       }
     }
 
