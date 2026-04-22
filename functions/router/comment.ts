@@ -189,10 +189,13 @@ commentRoutes.post('/', async (c) => {
         };
 
         const defaultReplySubject = '您在 {{site.name}} 的评论有了新的回复';
-        const defaultReplyTemplate = '<p>您好，{{parent.nick}}：</p><p>{{comment.nick}} 回复了您的评论：</p><blockquote>{{comment.content}}</blockquote><p><a href="{{site.url}}">点击此处查看</a></p>';
+        const defaultReplyTemplate = '<p>您好，{{parent.nick}}：</p><p>{{comment.nick}} 回复了您的评论：</p><blockquote>{{comment.content}}</blockquote><p>页面：{{comment.url}}</p><p><a href="{{comment.link}}">点击此处查看</a></p>';
         const defaultAdminSubject = '{{site.name}} 上有新评论';
-        const defaultAdminTemplate = '<p>新评论来自 {{comment.nick}}（{{comment.mail}}）：</p><blockquote>{{comment.content}}</blockquote><p>页面：{{comment.url}}</p><p><a href="{{site.url}}">点击此处查看</a></p>';
+        const defaultAdminTemplate = '<p>新评论来自 {{comment.nick}}（{{comment.mail}}）：</p><blockquote>{{comment.content}}</blockquote><p>页面：{{comment.url}}</p><p><a href="{{comment.link}}">点击此处查看</a></p>';
 
+        const commentLink = siteUrl && newComment.url
+          ? `${siteUrl.replace(/\/$/, '')}${newComment.url.startsWith('/') ? '' : '/'}${newComment.url}#waline`
+          : siteUrl || '';
         const vars: Record<string, string> = {
           'site.name': siteName,
           'site.url': siteUrl,
@@ -201,6 +204,7 @@ commentRoutes.post('/', async (c) => {
           'comment.content': newComment.comment || '',
           'comment.orig': newComment.orig || '',
           'comment.url': newComment.url || '',
+          'comment.link': commentLink,
           'parent.nick': parentComment?.nick || '',
           'parent.content': parentComment?.comment || '',
           'parent.mail': parentComment?.mail || '',

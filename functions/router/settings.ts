@@ -6,6 +6,7 @@ import {
   getSettings as kvGetSettings,
   setSettings,
 } from '../db/kv-store.js';
+import { sendMail } from '../utils/mail.js';
 
 export const settingsRoutes = new Hono<{
   Bindings: Env;
@@ -92,6 +93,55 @@ settingsRoutes.put('/', async (c) => {
   }
 
   return c.json({ errno: 0, errmsg: '' });
+});
+
+/**
+ * POST /api/settings/test-mail - Send a test email with current SMTP config
+ */
+settingsRoutes.post('/test-mail', async (c) => {
+  const userInfo = c.get('userInfo');
+  if (userInfo?.type !== 'administrator') {
+    return c.json({ errno: 1, errmsg: 'Unauthorized' }, 403);
+  }
+
+  const body = await c.req.json();
+  const to = (body.to || '').trim();
+  if (!to) {
+    return c.json({ errno: 1, errmsg: '请填写测试收件邮箱' }, 400);
+  }
+
+  const settingKeys = [
+    'smtp_service', 'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_secure',
+    'sender_name', 'sender_email',
+  ];
+  const kvSettings = await kvGetSettings(settingKeys);
+  const cfg = (key: string) => kvSettings[key] || (c.env as any)[key.toUpperCase()] || '';
+
+  const mailConfig = {
+    smtpService: cfg('smtp_service'),
+    smtpHost: cfg('smtp_host'),
+    smtpPort: cfg('smtp_port'),
+    smtpSecure: cfg('smtp_secure'),
+    smtpUser: cfg('smtp_user'),
+    smtpPass: cfg('smtp_pass'),
+    senderName: cfg('sender_name'),
+    senderEmail: cfg('sender_email'),
+  };
+
+  if (!cfg('smtp_user') || !cfg('smtp_pass')) {
+    return c.json({ errno: 1, errmsg: 'SMTP 用户名或密码未配置，请先保存邮件设置' }, 400);
+  }
+
+  try {
+    await sendMail(mailConfig, {
+      to,
+      subject: 'Waline SMTP 测试邮件',
+      html: '<p>这是一封来自 <b>Waline On EdgeOne</b> 的 SMTP 测试邮件。</p><p>如果您收到此邮件，说明当前邮件配置正确，可以正常收发评论通知。</p>',
+    });
+    return c.json({ errno: 0, errmsg: '测试邮件已发送，请查收' });
+  } catch (e: any) {
+    return c.json({ errno: 1, errmsg: '发送失败：' + (e.message || String(e)) });
+  }
 });
 
 /**

@@ -286,6 +286,17 @@ select{height:32px;min-width:200px}
       <input type="text" id="set-sender-email" placeholder="noreply@example.com" />
     </div>
 
+    <h4 style="margin:24px 0 16px;font-size:14px;color:#444;border-bottom:1px solid #eee;padding-bottom:8px">SMTP 测试</h4>
+    <div class="typecho-option">
+      <label class="typecho-label">测试收件邮箱</label>
+      <input type="text" id="set-test-mail-to" placeholder="admin@example.com" />
+      <p class="description">填写后点击下方按钮，将使用当前保存的 SMTP 配置发送一封测试邮件。</p>
+    </div>
+    <div class="typecho-option">
+      <button class="btn" id="test-mail-btn">发送测试邮件</button>
+      <span id="test-mail-result" style="margin-left:10px;font-size:13px;color:#666"></span>
+    </div>
+
     <h4 style="margin:24px 0 16px;font-size:14px;color:#444;border-bottom:1px solid #eee;padding-bottom:8px">邮件模板</h4>
     <div class="typecho-option">
       <label class="typecho-label">评论回复邮件标题</label>
@@ -512,6 +523,31 @@ select{height:32px;min-width:200px}
     api('/settings', { method: 'PUT', body: JSON.stringify(settings) }).then(function(r) {
       toast(r.errno ? (r.errmsg || '保存失败') : '设置已保存！', !r.errno);
     }).catch(function(){ toast('保存失败', false); });
+  });
+
+  // Test mail
+  document.getElementById('test-mail-btn').addEventListener('click', function() {
+    var btn = document.getElementById('test-mail-btn');
+    var result = document.getElementById('test-mail-result');
+    var to = document.getElementById('set-test-mail-to').value.trim();
+    if (!to) {
+      result.textContent = '请填写测试收件邮箱';
+      result.style.color = '#b94a48';
+      return;
+    }
+    btn.disabled = true;
+    result.textContent = '发送中…';
+    result.style.color = '#666';
+    api('/settings/test-mail', { method: 'POST', body: JSON.stringify({ to: to }) }).then(function(r) {
+      result.textContent = r.errmsg || (r.errno ? '发送失败' : '已发送');
+      result.style.color = r.errno ? '#b94a48' : '#264409';
+      if (!r.errno) toast('测试邮件已发送', true);
+    }).catch(function(e) {
+      result.textContent = '请求失败: ' + (e.message || '');
+      result.style.color = '#b94a48';
+    }).finally(function() {
+      btn.disabled = false;
+    });
   });
 })();
 </script>
