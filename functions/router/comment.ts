@@ -3,7 +3,6 @@ import type { Env, Variables } from '../env.js';
 import { getAvatar } from '../utils/avatar.js';
 import { parseUA } from '../utils/ua.js';
 import { renderMarkdown } from '../utils/markdown.js';
-import { validateGeetest } from '../utils/geetest.js';
 import { getSetting } from './settings.js';
 import {
   createComment,
@@ -81,26 +80,6 @@ commentRoutes.post('/', async (c) => {
   }
   if (ua && (typeof ua !== 'string' || ua.length > 1024)) {
     return c.json({ errno: 1, errmsg: 'ua is too long (max 1024 chars)' }, 400);
-  }
-
-  // Geetest CAPTCHA v4 validation
-  const geetestId = c.env.GEETEST_CAPTCHA_ID;
-  const geetestKey = c.env.GEETEST_CAPTCHA_KEY;
-  if (geetestId && geetestKey) {
-    const { lotNumber, passToken, genTime } = body;
-    if (!lotNumber || !passToken || !genTime) {
-      return c.json({ errno: 1, errmsg: '请完成验证' }, 400);
-    }
-    const geetestValid = await validateGeetest({
-      captchaId: geetestId,
-      captchaKey: geetestKey,
-      lotNumber,
-      passToken,
-      genTime,
-    });
-    if (!geetestValid) {
-      return c.json({ errno: 1, errmsg: '验证失败，请重试' }, 400);
-    }
   }
 
   // EdgeOne passes client IP via x-real-ip or x-forwarded-for
