@@ -142,10 +142,11 @@ commentRoutes.post('/', async (c) => {
       await updateComment(commentId, { status: newStatus });
     }
   };
-  const taskPromise = llmReviewTask().catch((err) => console.error('[LLM Review Error]', err?.message || err));
-  // EdgeOne may not support executionCtx.waitUntil; use it if available
-  if ((c as any).executionCtx?.waitUntil) {
-    (c as any).executionCtx.waitUntil(taskPromise);
+  // Always await LLM review inline to avoid floating promises / ExecutionContext issues
+  try {
+    await llmReviewTask();
+  } catch (err: any) {
+    try { console.error('[LLM Review Error]', err?.message || err); } catch {}
   }
 
   return c.json({

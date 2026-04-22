@@ -88,8 +88,13 @@ export function onRequest(context: {
   request: Request;
   params: Record<string, string>;
   env: Record<string, any>;
+  waitUntil?: (promise: Promise<any>) => void;
+  executionCtx?: { waitUntil: (promise: Promise<any>) => void; passThroughOnException?: () => void };
 }): Response | Promise<Response> {
-  return app.fetch(context.request, context.env);
+  const executionCtx = context.executionCtx || (context.waitUntil
+    ? { waitUntil: context.waitUntil.bind(context), passThroughOnException: () => {} }
+    : undefined);
+  return app.fetch(context.request, context.env, executionCtx);
 }
 
 export default app;
