@@ -102,10 +102,49 @@ ${showWorker ? `  <script>
       }
     }
 
-    var ob = new MutationObserver(function(){ tryInject(); });
+    function replaceLeanCloudNotice() {
+      var replacement = '感谢使用 Waline On EdgeOne 版，欢迎访问<a href="https://kok.plus" target="_blank" rel="noopener noreferrer">作者博客</a>讨论';
+      var keywords = ['Leancloud', '即将停止对外服务', '尽快迁移你的评论数据'];
+      var els = document.querySelectorAll('.ant-notification-notice, .ant-message-notice, [class*="notification"], [class*="message"], [class*="toast"], [class*="alert"]');
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        var text = el.textContent || '';
+        for (var j = 0; j < keywords.length; j++) {
+          if (text.indexOf(keywords[j]) !== -1) {
+            el.innerHTML = '<div style="padding:12px 16px;font-size:14px;line-height:1.5">' + replacement + '</div>';
+            return true;
+          }
+        }
+      }
+      // Fallback: search all text nodes
+      var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+      var node;
+      while (node = walker.nextNode()) {
+        var nt = node.textContent || '';
+        for (var k = 0; k < keywords.length; k++) {
+          if (nt.indexOf(keywords[k]) !== -1) {
+            var p = node.parentElement;
+            if (p && p !== document.body) {
+              p.innerHTML = replacement;
+              return true;
+            }
+          }
+        }
+      }
+      return false;
+    }
+
+    var ob = new MutationObserver(function(){
+      tryInject();
+      replaceLeanCloudNotice();
+    });
     ob.observe(document.body, { childList: true, subtree: true });
-    var iv = setInterval(function(){ tryInject(); if (menuDone && badgeDone) clearInterval(iv); }, 1500);
+    var iv = setInterval(function(){
+      tryInject();
+      if (menuDone && badgeDone) clearInterval(iv);
+    }, 1500);
     setTimeout(tryInject, 300);
+    setTimeout(function(){ replaceLeanCloudNotice(); }, 2000);
     setTimeout(function(){ clearInterval(iv); }, 60000);
   })();
   </script>` : ''}
