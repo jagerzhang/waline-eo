@@ -8,7 +8,7 @@ import type { Env } from '../env.js';
 import { getSetting } from '../router/settings.js';
 
 export async function getAdminPage(env: Env, requestUrl: string): Promise<string> {
-  const workerDisplay = await getSetting(env.KV, 'worker_display').catch(() => null) || 'admin';
+  const workerDisplay = await getSetting('worker_display').catch(() => null) || 'admin';
   const url = new URL(requestUrl);
   const serverURL = `${url.origin}/api/`;
   const siteName = env.SITE_NAME || '';

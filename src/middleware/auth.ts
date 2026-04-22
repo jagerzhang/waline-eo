@@ -33,7 +33,7 @@ export const auth = createMiddleware<{
     if (!payload?.id) return next();
 
     // Fetch user from KV
-    const user = await getUserById(c.env.KV, payload.id);
+    const user = await getUserById(payload.id);
 
     if (user && user.type !== 'banned') {
       c.set('userInfo', {

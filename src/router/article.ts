@@ -43,7 +43,7 @@ articleRoutes.get('/', async (c) => {
     return c.json({ errno: 0, errmsg: '', data: paths.map(() => ({})) });
   }
 
-  const counters = await getCountersByUrls(c.env.KV, paths);
+  const counters = await getCountersByUrls(paths);
 
   const respObj: Record<string, any> = {};
   for (const row of counters) {
@@ -80,14 +80,14 @@ articleRoutes.post('/', async (c) => {
     return c.json({ errno: 1, errmsg: 'invalid type' }, 400);
   }
 
-  const existing = await getCounterByUrl(c.env.KV, path);
+  const existing = await getCounterByUrl(path);
 
   if (!existing) {
     if (action === 'desc') {
       return c.json({ errno: 0, errmsg: '', data: [{ [type]: 0 }] });
     }
 
-    await createCounter(c.env.KV, path, type);
+    await createCounter(path, type);
 
     return c.json({ errno: 0, errmsg: '', data: [{ [type]: 1 }] });
   }
@@ -95,7 +95,7 @@ articleRoutes.post('/', async (c) => {
   const currentVal = (existing as any)[type] || 0;
   const newVal = action === 'desc' ? Math.max(0, currentVal - 1) : currentVal + 1;
 
-  await updateCounter(c.env.KV, path, type, newVal);
+  await updateCounter(path, type, newVal);
 
   return c.json({ errno: 0, errmsg: '', data: [{ [type]: newVal }] });
 });

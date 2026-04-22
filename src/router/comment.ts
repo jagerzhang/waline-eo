@@ -93,10 +93,10 @@ commentRoutes.post('/', async (c) => {
   // - Fallback: AUDIT env var, then approved
   let status: string;
   if (userInfo) {
-    const userDefault = await getSetting(c.env.KV, 'user_comment_default_status').catch(() => null);
+    const userDefault = await getSetting('user_comment_default_status').catch(() => null);
     status = (userDefault === 'waiting') ? 'waiting' : 'approved';
   } else {
-    const defaultStatus = await getSetting(c.env.KV, 'comment_default_status').catch(() => null);
+    const defaultStatus = await getSetting('comment_default_status').catch(() => null);
     if (defaultStatus === 'waiting' || defaultStatus === 'approved') {
       status = defaultStatus;
     } else if (c.env.AUDIT) {
@@ -109,7 +109,7 @@ commentRoutes.post('/', async (c) => {
   // Render markdown to HTML
   const renderedComment = renderMarkdown(comment);
 
-  const newComment = await createComment(c.env.KV, {
+  const newComment = await createComment({
     user_id: userInfo?.objectId ?? null,
     comment: renderedComment,
     orig: comment,
@@ -126,21 +126,20 @@ commentRoutes.post('/', async (c) => {
 
   // Async LLM review based on llm_mode and llm_skip_admin settings
   const commentId = newComment.id;
-  const db = c.env.KV;
   const llmReviewTask = async () => {
-    const llmMode = await getSetting(db, 'llm_mode').catch(() => null) || 'off';
+    const llmMode = await getSetting('llm_mode').catch(() => null) || 'off';
     if (llmMode === 'off') return;
     if (llmMode === 'anonymous' && userInfo) return;
     // llmMode === 'all': review everyone, but check skip_admin
     if (userInfo?.type === 'administrator') {
-      const skip = await getSetting(db, 'llm_skip_admin').catch(() => null);
+      const skip = await getSetting('llm_skip_admin').catch(() => null);
       if (skip !== '0') return; // default: skip admin
     }
-    const newStatus = await reviewComment(db, comment, nick || '', url, status);
+    const newStatus = await reviewComment(comment, nick || '', url, status);
     if (newStatus === status) return;
-    const existing = await getCommentById(db, commentId);
+    const existing = await getCommentById(commentId);
     if (existing && existing.status === status) {
-      await updateComment(db, commentId, { status: newStatus });
+      await updateComment(commentId, { status: newStatus });
     }
   };
   const taskPromise = llmReviewTask().catch((err) => console.error('[LLM Review Error]', err?.message || err));
@@ -167,11 +166,11 @@ commentRoutes.put('/:id', async (c) => {
 
   // Like action (anyone can like - increment by 1)
   if (body.like !== undefined && typeof body.like === 'boolean') {
-    const existing = await getCommentById(c.env.KV, id);
+    const existing = await getCommentById(id);
     if (!existing) {
       return c.json({ errno: 1, errmsg: 'Comment not found' }, 404);
     }
-    const updated = await updateComment(c.env.KV, id, {
+    const updated = await updateComment(id, {
       like: Math.max(0, (existing.like || 0) + 1),
     });
     return c.json({ errno: 0, errmsg: '', data: await formatComment(updated) });
@@ -229,7 +228,7 @@ commentRoutes.put('/:id', async (c) => {
     return c.json({ errno: 1, errmsg: 'No fields to update' }, 400);
   }
 
-  const updated = await updateComment(c.env.KV, id, updates);
+  const updated = await updateComment(id, updates);
   return c.json({ errno: 0, errmsg: '', data: await formatComment(updated) });
 });
 
@@ -245,8 +244,8 @@ commentRoutes.delete('/:id', async (c) => {
   }
 
   // Cascade delete: remove child comments
-  await deleteCommentsByRid(c.env.KV, id);
-  await deleteCommentById(c.env.KV, id);
+  await deleteCommentsByRid(id);
+  await deleteCommentById(id);
 
   return c.json({ errno: 0, errmsg: '' });
 });
@@ -273,8 +272,8 @@ commentRoutes.get('/rss', async (c) => {
   if (path) {
     // Filter by page path
     const { getCommentsByIds, getIds } = await import('../db/kv-store.js');
-    const ids = await getIds(c.env.KV, `index:comments:url:${path}`);
-    const all = await getCommentsByIds(c.env.KV, ids);
+    const ids = await getIds(`index:comments:url:${path}`);
+    const all = await getCommentsByIds(ids);
     comments = all
       .filter((c) => c.status !== 'waiting' && c.status !== 'spam')
       .sort((a, b) => b.insertedAt.localeCompare(a.insertedAt))
@@ -284,20 +283,20 @@ commentRoutes.get('/rss', async (c) => {
     const { getCommentsByIds, getIds } = await import('../db/kv-store.js');
     let parentIds: number[] = [];
     if (email && userId) {
-      const allIds = await getIds(c.env.KV, 'index:comments:all');
-      const allComments = await getCommentsByIds(c.env.KV, allIds);
+      const allIds = await getIds('index:comments:all');
+      const allComments = await getCommentsByIds(allIds);
       parentIds = allComments
         .filter((c) => c.status !== 'waiting' && c.status !== 'spam' && (c.mail === email || String(c.user_id) === userId))
         .map((c) => c.id);
     } else if (email) {
-      const allIds = await getIds(c.env.KV, 'index:comments:all');
-      const allComments = await getCommentsByIds(c.env.KV, allIds);
+      const allIds = await getIds('index:comments:all');
+      const allComments = await getCommentsByIds(allIds);
       parentIds = allComments
         .filter((c) => c.status !== 'waiting' && c.status !== 'spam' && c.mail === email)
         .map((c) => c.id);
     } else {
-      const allIds = await getIds(c.env.KV, 'index:comments:all');
-      const allComments = await getCommentsByIds(c.env.KV, allIds);
+      const allIds = await getIds('index:comments:all');
+      const allComments = await getCommentsByIds(allIds);
       parentIds = allComments
         .filter((c) => c.status !== 'waiting' && c.status !== 'spam' && String(c.user_id) === userId)
         .map((c) => c.id);
@@ -312,14 +311,14 @@ commentRoutes.get('/rss', async (c) => {
       }));
     }
 
-    const children = await getChildCommentsByRids(c.env.KV, parentIds, 'approved');
+    const children = await getChildCommentsByRids(parentIds, 'approved');
     comments = children
       .filter((c) => c.status !== 'waiting' && c.status !== 'spam')
       .sort((a, b) => b.insertedAt.localeCompare(a.insertedAt))
       .slice(0, limit);
   } else {
     // All recent comments
-    comments = await getRecentComments(c.env.KV, limit);
+    comments = await getRecentComments(limit);
   }
 
   // Fetch user display names
@@ -327,7 +326,7 @@ commentRoutes.get('/rss', async (c) => {
   let users: any[] = [];
   if (userIds.length > 0) {
     const { getUserById } = await import('../db/kv-store.js');
-    users = (await Promise.all(userIds.map((uid: number) => getUserById(c.env.KV, uid)))).filter(Boolean);
+    users = (await Promise.all(userIds.map((uid: number) => getUserById(uid)))).filter(Boolean);
   }
 
   // Build RSS items
@@ -381,7 +380,7 @@ async function getCommentList(c: any) {
   const offset = (page - 1) * pageSize;
 
   // Get root comments (sticky first)
-  const { comments: rootComments, total: totalCount } = await getRootCommentsByUrl(c.env.KV, path, {
+  const { comments: rootComments, total: totalCount } = await getRootCommentsByUrl(path, {
     orderBy,
     limit: pageSize,
     offset,
@@ -389,7 +388,7 @@ async function getCommentList(c: any) {
 
   // Get child comments for these roots
   const rootIds = rootComments.map((r: any) => r.id);
-  const children = await getChildCommentsByRids(c.env.KV, rootIds, 'approved');
+  const children = await getChildCommentsByRids(rootIds, 'approved');
 
   // Build threaded structure
   const data = await Promise.all(
@@ -418,7 +417,7 @@ async function getCommentList(c: any) {
 
 async function getRecentCommentsHandler(c: any) {
   const count = Math.min(50, Math.max(1, parseInt(c.req.query('count') || '10') || 10));
-  const comments = await getRecentComments(c.env.KV, count);
+  const comments = await getRecentComments(count);
 
   return c.json({
     errno: 0,
@@ -434,7 +433,7 @@ async function getCommentCountHandler(c: any) {
   }
 
   if (paths.length === 1) {
-    const count = await getCommentCountByUrl(c.env.KV, paths[0], 'approved');
+    const count = await getCommentCountByUrl(paths[0], 'approved');
     return c.json({
       errno: 0,
       errmsg: '',
@@ -442,7 +441,7 @@ async function getCommentCountHandler(c: any) {
     });
   }
 
-  const countMap = await getCommentCountsByUrls(c.env.KV, paths, 'approved');
+  const countMap = await getCommentCountsByUrls(paths, 'approved');
   return c.json({
     errno: 0,
     errmsg: '',
@@ -468,7 +467,7 @@ async function getAdminCommentList(c: any) {
     ownerEmail = userInfo.email;
   }
 
-  const { data, total } = await searchComments(c.env.KV, {
+  const { data, total } = await searchComments({
     status: status || undefined,
     keyword: keyword || undefined,
     ownerEmail,

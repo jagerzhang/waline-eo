@@ -1,7 +1,4 @@
 export interface Env {
-  // EdgeOne KV
-  KV: KVNamespace;
-
   // Environment variables
   JWT_SECRET?: string;
   SITE_NAME?: string;

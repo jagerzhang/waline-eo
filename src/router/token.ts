@@ -55,7 +55,7 @@ tokenRoutes.post('/', async (c) => {
     return c.json({ errno: 1, errmsg: 'email and password are required' }, 400);
   }
 
-  const user = await getUserByEmail(c.env.KV, email);
+  const user = await getUserByEmail(email);
 
   if (!user) {
     return c.json({ errno: 1, errmsg: 'Invalid credentials' }, 401);
@@ -121,7 +121,7 @@ tokenRoutes.get('/2fa', async (c) => {
 
   // Public check: is 2FA enabled for a given email?
   if (!userInfo && email) {
-    const user = await getUserByEmail(c.env.KV, email);
+    const user = await getUserByEmail(email);
 
     return c.json({
       errno: 0,
@@ -177,7 +177,7 @@ tokenRoutes.post('/2fa', async (c) => {
     return c.json({ errno: 1, errmsg: 'Two factor auth verify failed, please try again' }, 401);
   }
 
-  await updateUser(c.env.KV, userInfo.objectId, { '2fa': secret });
+  await updateUser(userInfo.objectId, { '2fa': secret });
 
   return c.json({ errno: 0, errmsg: '' });
 });

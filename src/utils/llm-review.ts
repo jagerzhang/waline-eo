@@ -6,13 +6,12 @@ import { getSettings } from '../router/settings.js';
  * llm_mode: 'off' | 'anonymous' | 'all' (controls when LLM review runs; caller decides whether to call)
  */
 export async function reviewComment(
-  kv: KVNamespace,
   commentText: string,
   nick: string,
   url: string,
   defaultStatus: string,
 ): Promise<string> {
-  const settings = await getSettings(kv, [
+  const settings = await getSettings([
     'llm_endpoint', 'llm_api_key', 'llm_model', 'llm_prompt',
   ]);
 

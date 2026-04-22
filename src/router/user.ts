@@ -31,7 +31,7 @@ userRoutes.get('/', async (c) => {
   // Admin: lookup user by email (used by import flow)
   const emailQuery = c.req.query('email');
   if (isAdmin && emailQuery) {
-    const user = await getUserByEmail(c.env.KV, emailQuery);
+    const user = await getUserByEmail(emailQuery);
     if (user) {
       return c.json({ errno: 0, objectId: String(user.id), ...user });
     }
@@ -43,9 +43,9 @@ userRoutes.get('/', async (c) => {
     const pageSize = Math.min(100, Math.max(1, parseInt(c.req.query('pageSize') || '10') || 10));
     const offset = (page - 1) * pageSize;
 
-    const total = await getUserCount(c.env.KV);
+    const total = await getUserCount();
 
-    const { data } = await getUsers(c.env.KV, { limit: pageSize, offset });
+    const { data } = await getUsers({ limit: pageSize, offset });
 
     return c.json({
       errno: 0,
@@ -61,7 +61,7 @@ userRoutes.get('/', async (c) => {
 
   // Public: top commenters
   const count = Math.min(50, Math.max(1, parseInt(c.req.query('count') || '10') || 10));
-  const result = await getTopCommenters(c.env.KV, count);
+  const result = await getTopCommenters(count);
 
   return c.json({
     errno: 0,
@@ -89,19 +89,19 @@ userRoutes.post('/', async (c) => {
   }
 
   // Check if email exists
-  const existing = await getUserByEmail(c.env.KV, email);
+  const existing = await getUserByEmail(email);
 
   if (existing) {
     return c.json({ errno: 1, errmsg: 'Registration failed' }, 409);
   }
 
   // Check if first user (becomes admin)
-  const userCount = await getUserCount(c.env.KV);
+  const userCount = await getUserCount();
   const isFirst = userCount === 0;
 
   const hashedPassword = await hashPassword(password);
 
-  const newUser = await createUser(c.env.KV, {
+  const newUser = await createUser({
     display_name: display_name || email.split('@')[0],
     email,
     password: hashedPassword,
@@ -157,7 +157,7 @@ userRoutes.put('/:id', async (c) => {
     return c.json({ errno: 1, errmsg: 'No fields to update' }, 400);
   }
 
-  const updated = await updateUser(c.env.KV, id, updates);
+  const updated = await updateUser(id, updates);
 
   return c.json({ errno: 0, errmsg: '', data: await formatUser(updated) });
 });
@@ -174,7 +174,7 @@ userRoutes.delete('/:id', async (c) => {
   }
 
   // Ban verified users, delete unverified
-  const target = await getUserById(c.env.KV, id);
+  const target = await getUserById(id);
 
   if (!target) {
     return c.json({ errno: 1, errmsg: 'User not found' }, 404);
@@ -182,10 +182,10 @@ userRoutes.delete('/:id', async (c) => {
 
   if ((target.type as string).startsWith('verify:') || target.type === 'guest') {
     // Unverified or guest: hard delete
-    await deleteUserById(c.env.KV, id);
+    await deleteUserById(id);
   } else {
     // Verified: ban
-    await updateUser(c.env.KV, id, { type: 'banned' });
+    await updateUser(id, { type: 'banned' });
   }
 
   return c.json({ errno: 0, errmsg: '' });

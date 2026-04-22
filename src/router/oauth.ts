@@ -77,28 +77,28 @@ oauthRoutes.get('/', async (c) => {
     let user: Record<string, unknown> | null = null;
 
     if (socialField) {
-      user = await getUserBySocial(c.env.KV, socialField, socialId);
+      user = await getUserBySocial(socialField, socialId);
     }
 
     // If not found by social, try by email
     if (!user && socialEmail) {
-      user = await getUserByEmail(c.env.KV, socialEmail);
+      user = await getUserByEmail(socialEmail);
 
       // Link social account
       if (user && socialField) {
-        await updateUser(c.env.KV, user.id as number, { [socialField]: socialId });
-        user = await getUserById(c.env.KV, user.id as number);
+        await updateUser(user.id as number, { [socialField]: socialId });
+        user = await getUserById(user.id as number);
       }
     }
 
     // Create new user if not found
     if (!user) {
-      const userCount = await getUserCount(c.env.KV);
+      const userCount = await getUserCount();
       const isFirst = userCount === 0;
 
       const email = socialEmail || `${type}_${socialId}@oauth.local`;
 
-      const newUser = await createUser(c.env.KV, {
+      const newUser = await createUser({
         display_name: socialName || socialId,
         email,
         password: '',

@@ -80,19 +80,19 @@ dbRoutes.get('/', async (c) => {
     },
   };
 
-  const comments = await getAllComments(c.env.KV);
+  const comments = await getAllComments();
   exportData.data.Comment = comments.map((row: any) => ({
     ...row,
     objectId: String(row.id),
   }));
 
-  const counters = await getAllCounters(c.env.KV);
+  const counters = await getAllCounters();
   exportData.data.Counter = counters.map((row: any) => ({
     ...row,
     objectId: String(row.id),
   }));
 
-  const users = await getAllUsers(c.env.KV);
+  const users = await getAllUsers();
   exportData.data.Users = users.map((row: any) => ({
     ...row,
     objectId: String(row.id),
@@ -133,25 +133,25 @@ dbRoutes.post('/', async (c) => {
 
   let created: any;
   if (table === 'Comment') {
-    created = await createComment(c.env.KV, data);
+    created = await createComment(data);
   } else if (table === 'Counter') {
     // Create counter with all provided fields
     const url = data.url || '';
     const initField = Object.keys(data).find((k) => k !== 'url' && k !== 'id' && VALID_COUNTER_FIELDS.has(k)) || 'time';
     const initValue = typeof data[initField] === 'number' ? data[initField] : (parseInt(String(data[initField])) || 1);
     // Override createCounter's default value with imported value
-    created = await createCounter(c.env.KV, url, initField);
+    created = await createCounter(url, initField);
     if (initValue !== 1) {
-      await updateCounter(c.env.KV, url, initField, initValue);
+      await updateCounter(url, initField, initValue);
     }
     // Apply remaining fields
     for (const [k, v] of Object.entries(data)) {
       if (k !== 'url' && k !== 'id' && VALID_COUNTER_FIELDS.has(k) && k !== initField) {
-        await updateCounter(c.env.KV, url, k, typeof v === 'number' ? v : parseInt(String(v)) || 0);
+        await updateCounter(url, k, typeof v === 'number' ? v : parseInt(String(v)) || 0);
       }
     }
   } else if (table === 'Users') {
-    created = await createUser(c.env.KV, data);
+    created = await createUser(data);
   }
 
   if (!created) {
@@ -193,19 +193,19 @@ dbRoutes.put('/', async (c) => {
 
   const id = Number(objectId);
   if (table === 'Comment') {
-    await updateComment(c.env.KV, id, data);
+    await updateComment(id, data);
   } else if (table === 'Counter') {
     const { getCounterById } = await import('../db/kv-store.js');
-    const counter = await getCounterById(c.env.KV, id);
+    const counter = await getCounterById(id);
     if (counter) {
       for (const [k, v] of Object.entries(data)) {
         if (k !== 'url' && k !== 'id' && VALID_COUNTER_FIELDS.has(k)) {
-          await updateCounter(c.env.KV, counter.url, k, typeof v === 'number' ? v : parseInt(String(v)) || 0);
+          await updateCounter(counter.url, k, typeof v === 'number' ? v : parseInt(String(v)) || 0);
         }
       }
     }
   } else if (table === 'Users') {
-    await updateUser(c.env.KV, id, data);
+    await updateUser(id, data);
   }
 
   return c.json({ errno: 0 });
@@ -221,11 +221,11 @@ dbRoutes.delete('/', async (c) => {
   }
 
   if (table === 'Comment') {
-    await clearComments(c.env.KV);
+    await clearComments();
   } else if (table === 'Counter') {
-    await clearCounters(c.env.KV);
+    await clearCounters();
   } else if (table === 'Users') {
-    await clearUsers(c.env.KV);
+    await clearUsers();
   }
 
   return c.json({ errno: 0 });

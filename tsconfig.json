@@ -13,8 +13,8 @@
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx",
     "lib": ["ESNext"],
-    "types": ["@cloudflare/workers-types"]
+    "types": []
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src", "functions"],
   "exclude": ["node_modules", "waline"]
 }

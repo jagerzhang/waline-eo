@@ -34,7 +34,7 @@ settingsRoutes.get('/', async (c) => {
     return c.json({ errno: 1, errmsg: 'Unauthorized' }, 403);
   }
 
-  const allSettings = await getAllSettings(c.env.KV);
+  const allSettings = await getAllSettings();
 
   // Sensitive keys that must be masked in API responses
   const MASKED_KEYS = new Set(['llm_api_key']);
@@ -73,7 +73,7 @@ settingsRoutes.put('/', async (c) => {
   }
 
   if (Object.keys(toSave).length > 0) {
-    await setSettings(c.env.KV, toSave);
+    await setSettings(toSave);
   }
 
   return c.json({ errno: 0, errmsg: '' });
@@ -82,13 +82,13 @@ settingsRoutes.put('/', async (c) => {
 /**
  * Helper: Get a single setting value
  */
-export async function getSetting(kv: KVNamespace, key: string): Promise<string | null> {
-  return kvGetSetting(kv, key);
+export async function getSetting(key: string): Promise<string | null> {
+  return kvGetSetting(key);
 }
 
 /**
  * Helper: Get multiple settings at once
  */
-export async function getSettings(kv: KVNamespace, keys: string[]): Promise<Record<string, string>> {
-  return kvGetSettings(kv, keys);
+export async function getSettings(keys: string[]): Promise<Record<string, string>> {
+  return kvGetSettings(keys);
 }
