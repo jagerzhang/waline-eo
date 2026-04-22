@@ -157,7 +157,7 @@ select{height:32px;min-width:200px}
     </div>
   </div>
 
-  <!-- Tab: Comment Policy + LLM Review -->
+  <!-- Tab: Comment Policy -->
   <div class="typecho-table-wrap tab-panel" id="tab-comment" style="display:none">
     <h4 style="margin:0 0 16px;font-size:14px;color:#444;border-bottom:1px solid #eee;padding-bottom:8px">默认状态</h4>
     <div class="typecho-option">
@@ -166,7 +166,7 @@ select{height:32px;min-width:200px}
         <option value="approved">直接通过 (approved)</option>
         <option value="waiting">等待审核 (waiting)</option>
       </select>
-      <p class="description">未登录用户发表评论的默认状态。此设置优先于环境变量 AUDIT。</p>
+      <p class="description">未登录用户发表评论的默认状态。此设置优先于环境变量 COMMENT_AUDIT。</p>
     </div>
     <div class="typecho-option">
       <label class="typecho-label">用户评论默认状态</label>
@@ -175,44 +175,6 @@ select{height:32px;min-width:200px}
         <option value="waiting">等待审核 (waiting)</option>
       </select>
       <p class="description">已登录用户发表评论的默认状态。</p>
-    </div>
-    <h4 style="margin:24px 0 16px;font-size:14px;color:#444;border-bottom:1px solid #eee;padding-bottom:8px">LLM 审查</h4>
-    <div class="typecho-option">
-      <label class="typecho-label">LLM 审查模式</label>
-      <select id="set-llm-mode">
-        <option value="off">关闭</option>
-        <option value="anonymous">仅对匿名评论启用</option>
-        <option value="all" selected>全部评论 (默认)</option>
-      </select>
-      <p class="description">选择 LLM 自动审查的适用范围。「关闭」不进行审查；「仅匿名」仅审查未登录用户的评论；「全部」审查所有评论。</p>
-    </div>
-    <div class="typecho-option">
-      <label class="typecho-label">管理员跳过审查</label>
-      <div class="toggle-row">
-        <label class="toggle"><input type="checkbox" id="set-llm-skip-admin" checked /><span class="toggle-slider"></span></label>
-        <span class="toggle-label">管理员发表的评论跳过 LLM 审查（默认开启）</span>
-      </div>
-    </div>
-    <div class="typecho-option">
-      <label class="typecho-label">API Endpoint</label>
-      <input type="url" id="set-llm-ep" placeholder="https://api.openai.com/v1/chat/completions" />
-      <p class="description">OpenAI 兼容的 Chat Completions 端点</p>
-    </div>
-    <div class="typecho-option">
-      <label class="typecho-label">API Key</label>
-      <input type="password" id="set-llm-key" placeholder="sk-..." />
-    </div>
-    <div class="typecho-option">
-      <label class="typecho-label">Model</label>
-      <input type="text" id="set-llm-model" placeholder="gpt-4o-mini" />
-    </div>
-    <div class="typecho-option">
-      <label class="typecho-label">System Prompt</label>
-      <textarea id="set-llm-prompt" rows="6" placeholder="You are a review bot. Output a single word: approved or spam."></textarea>
-    </div>
-    <p class="description" style="margin-top:10px;color:#888">LLM 调用失败时，将遵循对应的评论默认状态设置（匿名/用户）。</p>
-    <div style="margin-top:16px">
-      <button class="btn" id="test-btn">测试 LLM 连接</button>
     </div>
   </div>
 
@@ -295,14 +257,6 @@ select{height:32px;min-width:200px}
     document.getElementById('set-comment-status').value = s.comment_default_status || 'approved';
     document.getElementById('set-user-comment-status').value = s.user_comment_default_status || 'approved';
     document.getElementById('set-worker-display').value = s.worker_display || 'admin';
-    // llm_mode: migrate from old llm_enabled if present
-    var mode = s.llm_mode || (s.llm_enabled === '1' ? 'anonymous' : 'off');
-    document.getElementById('set-llm-mode').value = mode;
-    document.getElementById('set-llm-skip-admin').checked = s.llm_skip_admin !== '0';
-    document.getElementById('set-llm-ep').value = s.llm_endpoint || '';
-    document.getElementById('set-llm-key').value = s.llm_api_key || '';
-    document.getElementById('set-llm-model').value = s.llm_model || 'gpt-4o-mini';
-    document.getElementById('set-llm-prompt').value = s.llm_prompt || 'You are a review bot. Output a single word: approved or spam.';
 
     // Match selected version in dropdown
     var sel = document.getElementById('version-select');
@@ -322,29 +276,12 @@ select{height:32px;min-width:200px}
       comment_default_status: document.getElementById('set-comment-status').value,
       user_comment_default_status: document.getElementById('set-user-comment-status').value,
       worker_display: document.getElementById('set-worker-display').value,
-      llm_mode: document.getElementById('set-llm-mode').value,
-      llm_skip_admin: document.getElementById('set-llm-skip-admin').checked ? '1' : '0',
-      llm_endpoint: document.getElementById('set-llm-ep').value.trim(),
-      llm_api_key: document.getElementById('set-llm-key').value.trim(),
-      llm_model: document.getElementById('set-llm-model').value.trim(),
-      llm_prompt: document.getElementById('set-llm-prompt').value.trim(),
     };
     api('/settings', { method: 'PUT', body: JSON.stringify(settings) }).then(function(r) {
       toast(r.errno ? (r.errmsg || '保存失败') : '设置已保存！', !r.errno);
     }).catch(function(){ toast('保存失败', false); });
   });
 
-  // Test LLM
-  document.getElementById('test-btn').addEventListener('click', function() {
-    var ep = document.getElementById('set-llm-ep').value.trim();
-    var key = document.getElementById('set-llm-key').value.trim();
-    var model = document.getElementById('set-llm-model').value.trim();
-    if (!ep || !key) { toast('请先填写 Endpoint 和 Key', false); return; }
-    fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
-      body: JSON.stringify({ model: model || 'gpt-4o-mini', messages: [{ role: 'user', content: 'Hello, respond with OK' }], max_tokens: 10 }) })
-    .then(function(r) { toast(r.ok ? 'LLM 连接正常！' : '失败: ' + r.status, r.ok); })
-    .catch(function(e) { toast('错误: ' + e.message, false); });
-  });
 })();
 </script>
 </body>

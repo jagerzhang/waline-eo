@@ -3,7 +3,7 @@ import type { Env, Variables } from '../env.js';
 import { getAvatar } from '../utils/avatar.js';
 import { parseUA } from '../utils/ua.js';
 import { renderMarkdown } from '../utils/markdown.js';
-import { reviewComment } from '../utils/llm-review.js';
+import { validateGeetest } from '../utils/geetest.js';
 import { getSetting } from './settings.js';
 import {
   createComment,
@@ -83,6 +83,26 @@ commentRoutes.post('/', async (c) => {
     return c.json({ errno: 1, errmsg: 'ua is too long (max 1024 chars)' }, 400);
   }
 
+  // Geetest CAPTCHA v4 validation
+  const geetestId = c.env.GEETEST_CAPTCHA_ID;
+  const geetestKey = c.env.GEETEST_CAPTCHA_KEY;
+  if (geetestId && geetestKey) {
+    const { lotNumber, passToken, genTime } = body;
+    if (!lotNumber || !passToken || !genTime) {
+      return c.json({ errno: 1, errmsg: '请完成验证' }, 400);
+    }
+    const geetestValid = await validateGeetest({
+      captchaId: geetestId,
+      captchaKey: geetestKey,
+      lotNumber,
+      passToken,
+      genTime,
+    });
+    if (!geetestValid) {
+      return c.json({ errno: 1, errmsg: '验证失败，请重试' }, 400);
+    }
+  }
+
   // EdgeOne passes client IP via x-real-ip or x-forwarded-for
   const ip = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || '';
   const userInfo = c.get('userInfo');
@@ -99,7 +119,7 @@ commentRoutes.post('/', async (c) => {
     const defaultStatus = await getSetting('comment_default_status').catch(() => null);
     if (defaultStatus === 'waiting' || defaultStatus === 'approved') {
       status = defaultStatus;
-    } else if (c.env.AUDIT) {
+    } else if (c.env.COMMENT_AUDIT || c.env.AUDIT) {
       status = 'waiting';
     } else {
       status = 'approved';
@@ -124,35 +144,10 @@ commentRoutes.post('/', async (c) => {
     url,
   });
 
-  // Async LLM review based on llm_mode and llm_skip_admin settings
-  const commentId = newComment.id;
-  const llmReviewTask = async () => {
-    const llmMode = await getSetting('llm_mode').catch(() => null) || 'off';
-    if (llmMode === 'off') return;
-    if (llmMode === 'anonymous' && userInfo) return;
-    // llmMode === 'all': review everyone, but check skip_admin
-    if (userInfo?.type === 'administrator') {
-      const skip = await getSetting('llm_skip_admin').catch(() => null);
-      if (skip !== '0') return; // default: skip admin
-    }
-    const newStatus = await reviewComment(comment, nick || '', url, status);
-    if (newStatus === status) return;
-    const existing = await getCommentById(commentId);
-    if (existing && existing.status === status) {
-      await updateComment(commentId, { status: newStatus });
-    }
-  };
-  // Always await LLM review inline to avoid floating promises / ExecutionContext issues
-  try {
-    await llmReviewTask();
-  } catch (err: any) {
-    try { console.error('[LLM Review Error]', err?.message || err); } catch {}
-  }
-
   return c.json({
     errno: 0,
     errmsg: '',
-    data: await formatComment(newComment),
+    data: await formatComment(newComment, false, c.env),
   }, 201);
 });
 
@@ -174,7 +169,7 @@ commentRoutes.put('/:id', async (c) => {
     const updated = await updateComment(id, {
       like: Math.max(0, (existing.like || 0) + 1),
     });
-    return c.json({ errno: 0, errmsg: '', data: await formatComment(updated) });
+    return c.json({ errno: 0, errmsg: '', data: await formatComment(updated, false, c.env) });
   }
 
   // Only admin can update other fields
@@ -230,7 +225,7 @@ commentRoutes.put('/:id', async (c) => {
   }
 
   const updated = await updateComment(id, updates);
-  return c.json({ errno: 0, errmsg: '', data: await formatComment(updated) });
+  return c.json({ errno: 0, errmsg: '', data: await formatComment(updated, false, c.env) });
 });
 
 /**
@@ -380,11 +375,12 @@ async function getCommentList(c: any) {
   const orderBy = orderMap[sortBy] || 'insertedAt DESC';
   const offset = (page - 1) * pageSize;
 
-  // Get root comments (sticky first)
+  // Get root comments (sticky first, only approved for public view)
   const { comments: rootComments, total: totalCount } = await getRootCommentsByUrl(path, {
     orderBy,
     limit: pageSize,
     offset,
+    status: 'approved',
   });
 
   // Get child comments for these roots
@@ -394,11 +390,11 @@ async function getCommentList(c: any) {
   // Build threaded structure
   const data = await Promise.all(
     rootComments.map(async (root: any) => ({
-      ...(await formatComment(root)),
+      ...(await formatComment(root, false, c.env)),
       children: await Promise.all(
         children
           .filter((child: any) => child.rid === root.id)
-          .map((child: any) => formatComment(child)),
+          .map((child: any) => formatComment(child, false, c.env)),
       ),
     })),
   );
@@ -423,7 +419,7 @@ async function getRecentCommentsHandler(c: any) {
   return c.json({
     errno: 0,
     errmsg: '',
-    data: await Promise.all(comments.map((r: any) => formatComment(r))),
+    data: await Promise.all(comments.map((r: any) => formatComment(r, false, c.env))),
   });
 }
 
@@ -485,14 +481,15 @@ async function getAdminCommentList(c: any) {
       spamCount: 0,
       waitingCount: 0,
       totalPages: Math.ceil(total / pageSize),
-      data: await Promise.all(data.map((r: any) => formatComment(r, true))),
+      data: await Promise.all(data.map((r: any) => formatComment(r, true, c.env))),
     },
   });
 }
 
-async function formatComment(row: any, isAdmin = false) {
+async function formatComment(row: any, isAdmin = false, env?: Env) {
   if (!row) return null;
-  const { browser, os } = parseUA(row.ua || '');
+  const disableUA = env?.DISABLE_USERAGENT === 'true';
+  const { browser, os } = disableUA ? { browser: '', os: '' } : parseUA(row.ua || '');
   const avatar = await getAvatar(row.mail || '');
   const result: Record<string, any> = {
     objectId: row.id,
@@ -514,6 +511,11 @@ async function formatComment(row: any, isAdmin = false) {
     sticky: Boolean(row.sticky),
     user_id: row.user_id,
   };
+
+  // Author email badge
+  if (env?.AUTHOR_EMAIL && row.mail && row.mail.toLowerCase() === env.AUTHOR_EMAIL.toLowerCase()) {
+    result.label = '博主';
+  }
 
   if (isAdmin) {
     result.mail = row.mail || '';

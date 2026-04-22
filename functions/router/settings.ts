@@ -17,12 +17,8 @@ const ALLOWED_KEYS = new Set([
   'comment_default_status',
   'user_comment_default_status',
   'worker_display',
-  'llm_mode',
-  'llm_skip_admin',
-  'llm_endpoint',
-  'llm_api_key',
-  'llm_model',
-  'llm_prompt',
+  'geetest_captcha_id',
+  'geetest_captcha_key',
 ]);
 
 /**
@@ -36,19 +32,9 @@ settingsRoutes.get('/', async (c) => {
 
   const allSettings = await getAllSettings();
 
-  // Sensitive keys that must be masked in API responses
-  const MASKED_KEYS = new Set(['llm_api_key']);
-
   const settings: Record<string, string> = {};
   for (const [key, value] of Object.entries(allSettings)) {
-    if (MASKED_KEYS.has(key) && value) {
-      // Show only first 3 and last 4 chars: "sk-****xxxx"
-      settings[key] = value.length > 7
-        ? value.slice(0, 3) + '****' + value.slice(-4)
-        : '****';
-    } else {
-      settings[key] = value;
-    }
+    settings[key] = value;
   }
 
   return c.json({ errno: 0, errmsg: '', data: settings });

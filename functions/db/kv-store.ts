@@ -520,37 +520,65 @@ export async function getCommentsByIds(ids: number[]): Promise<KVComment[]> {
 
 export async function getRootCommentsByUrl(
   url: string,
-  options: { orderBy: string; limit: number; offset: number },
+  options: { orderBy: string; limit: number; offset: number; status?: string },
 ): Promise<{ comments: KVComment[]; total: number }> {
-  const total = await getRootCount(url);
-  if (total === 0) return { comments: [], total: 0 };
+  const totalAll = await getRootCount(url);
+  if (totalAll === 0) return { comments: [], total: 0 };
 
   const pages = await getRootPages(url);
-  const pageStart = Math.floor(options.offset / ROOT_PAGE_SIZE);
-  const pageEnd = Math.min(Math.floor((options.offset + options.limit - 1) / ROOT_PAGE_SIZE), pages - 1);
 
-  const allComments: KVComment[] = [];
-  for (let page = pageStart; page <= pageEnd; page++) {
-    const ids = await getRootPageIds(url, page);
-    const comments = await Promise.all(ids.map((id) => getCommentById(id)));
-    allComments.push(...comments.filter((c): c is KVComment => c !== null));
-  }
+  if (options.status) {
+    // When filtering by status, read all comments to ensure correct filtering and sorting
+    const allComments: KVComment[] = [];
+    for (let page = 0; page < pages; page++) {
+      const ids = await getRootPageIds(url, page);
+      const comments = await Promise.all(ids.map((id) => getCommentById(id)));
+      allComments.push(...comments.filter((c): c is KVComment => c !== null));
+    }
 
-  const startIdxInPage = options.offset % ROOT_PAGE_SIZE;
-  const sliced = allComments.slice(startIdxInPage, startIdxInPage + options.limit);
+    let filtered = allComments.filter((c) => c.status === options.status);
 
-  if (options.orderBy === 'insertedAt ASC') {
-    sliced.sort((a, b) => a.insertedAt.localeCompare(b.insertedAt));
-  } else if (options.orderBy === 'like DESC') {
-    sliced.sort((a, b) => b.like - a.like);
+    if (options.orderBy === 'insertedAt ASC') {
+      filtered.sort((a, b) => a.insertedAt.localeCompare(b.insertedAt));
+    } else if (options.orderBy === 'like DESC') {
+      filtered.sort((a, b) => b.like - a.like);
+    } else {
+      filtered.sort((a, b) => {
+        if (b.sticky !== a.sticky) return b.sticky - a.sticky;
+        return b.insertedAt.localeCompare(a.insertedAt);
+      });
+    }
+
+    const total = filtered.length;
+    return { comments: filtered.slice(options.offset, options.offset + options.limit), total };
   } else {
-    sliced.sort((a, b) => {
-      if (b.sticky !== a.sticky) return b.sticky - a.sticky;
-      return b.insertedAt.localeCompare(a.insertedAt);
-    });
-  }
+    // No status filter: optimized path, only read needed pages
+    const pageStart = Math.floor(options.offset / ROOT_PAGE_SIZE);
+    const pageEnd = Math.min(Math.floor((options.offset + options.limit - 1) / ROOT_PAGE_SIZE), pages - 1);
 
-  return { comments: sliced, total };
+    const allComments: KVComment[] = [];
+    for (let page = pageStart; page <= pageEnd; page++) {
+      const ids = await getRootPageIds(url, page);
+      const comments = await Promise.all(ids.map((id) => getCommentById(id)));
+      allComments.push(...comments.filter((c): c is KVComment => c !== null));
+    }
+
+    const startIdxInPage = options.offset % ROOT_PAGE_SIZE;
+    const sliced = allComments.slice(startIdxInPage, startIdxInPage + options.limit);
+
+    if (options.orderBy === 'insertedAt ASC') {
+      sliced.sort((a, b) => a.insertedAt.localeCompare(b.insertedAt));
+    } else if (options.orderBy === 'like DESC') {
+      sliced.sort((a, b) => b.like - a.like);
+    } else {
+      sliced.sort((a, b) => {
+        if (b.sticky !== a.sticky) return b.sticky - a.sticky;
+        return b.insertedAt.localeCompare(a.insertedAt);
+      });
+    }
+
+    return { comments: sliced, total: totalAll };
+  }
 }
 
 export async function getChildCommentsByRids(rids: number[], status?: string): Promise<KVComment[]> {

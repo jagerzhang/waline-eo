@@ -8,6 +8,9 @@ export interface Env {
   DISABLE_REGION?: string;
   IPQPS?: string;
   AUDIT?: string;
+  COMMENT_AUDIT?: string;
+  AUTHOR_EMAIL?: string;
+  LEVELS?: string;
 
   // SMTP
   SMTP_SERVICE?: string;
@@ -29,6 +32,10 @@ export interface Env {
   TURNSTILE_SECRET?: string;
   RECAPTCHA_V3_KEY?: string;
   RECAPTCHA_V3_SECRET?: string;
+
+  // Geetest CAPTCHA v4
+  GEETEST_CAPTCHA_ID?: string;
+  GEETEST_CAPTCHA_KEY?: string;
 }
 
 export interface UserInfo {
