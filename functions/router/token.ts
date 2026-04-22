@@ -58,16 +58,16 @@ tokenRoutes.post('/', async (c) => {
   const user = await getUserByEmail(email);
 
   if (!user) {
-    return c.json({ errno: 1, errmsg: 'Invalid credentials' }, 401);
+    return c.json({ errno: 1, errmsg: 'User not found' }, 401);
   }
 
   if ((user.type as string) === 'banned') {
-    return c.json({ errno: 1, errmsg: 'Invalid credentials' }, 401);
+    return c.json({ errno: 1, errmsg: 'User banned' }, 401);
   }
 
   const valid = await verifyPassword(password, user.password as string);
   if (!valid) {
-    return c.json({ errno: 1, errmsg: 'Invalid credentials' }, 401);
+    return c.json({ errno: 1, errmsg: 'Password mismatch' }, 401);
   }
 
   // Check 2FA

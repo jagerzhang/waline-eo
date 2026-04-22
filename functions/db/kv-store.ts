@@ -74,16 +74,14 @@ function nowIso(): string {
 
 async function getJson<T>(key: string): Promise<T | null> {
   try {
-    // Try native JSON parse first; fallback to manual parse for broader KV compatibility
-    let val: any;
-    try {
-      val = await WALINE_KV.get(key, 'json');
-    } catch {
-      const raw = await WALINE_KV.get(key);
-      if (!raw) return null;
-      val = JSON.parse(raw);
+    // EdgeOne Pages KV.get returns string | object | ArrayBuffer | ReadableStream.
+    // Always fetch as raw string/object, then parse if needed.
+    const raw = await WALINE_KV.get(key);
+    if (!raw) return null;
+    if (typeof raw === 'string') {
+      return JSON.parse(raw) as T;
     }
-    return val as T;
+    return raw as T;
   } catch {
     return null;
   }

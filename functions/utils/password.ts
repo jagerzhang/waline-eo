@@ -12,9 +12,7 @@ const KEY_LENGTH = 32;
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
-  const key = await deriveKey(password, salt);
-
-  const hashBuffer = await crypto.subtle.exportKey('raw', key) as ArrayBuffer;
+  const hashBuffer = await deriveBits(password, salt);
   const hashArray = new Uint8Array(hashBuffer);
 
   // Format: $pbkdf2$iterations$base64salt$base64hash
@@ -47,17 +45,46 @@ export async function verifyPassword(
   const salt = base64ToUint8(parts[3]);
   const expectedHash = base64ToUint8(parts[4]);
 
-  const key = await deriveKey(password, salt, iterations);
-  const actualHash = new Uint8Array(await crypto.subtle.exportKey('raw', key) as ArrayBuffer);
-
-  if (actualHash.length !== expectedHash.length) return false;
-
-  // Constant-time comparison
-  let diff = 0;
-  for (let i = 0; i < actualHash.length; i++) {
-    diff |= actualHash[i] ^ expectedHash[i];
+  // Try deriveBits first (better compatibility on some edge runtimes)
+  const actualHashBuffer = await deriveBits(password, salt, iterations);
+  const actualHash = new Uint8Array(actualHashBuffer);
+  if (actualHash.length === expectedHash.length) {
+    let diff = 0;
+    for (let i = 0; i < actualHash.length; i++) {
+      diff |= actualHash[i] ^ expectedHash[i];
+    }
+    if (diff === 0) return true;
   }
-  return diff === 0;
+
+  // Fallback to deriveKey+exportKey for hashes created by older code
+  const key = await deriveKey(password, salt, iterations);
+  const fallbackHash = new Uint8Array(await crypto.subtle.exportKey('raw', key) as ArrayBuffer);
+  if (fallbackHash.length !== expectedHash.length) return false;
+  let diff2 = 0;
+  for (let i = 0; i < fallbackHash.length; i++) {
+    diff2 |= fallbackHash[i] ^ expectedHash[i];
+  }
+  return diff2 === 0;
+}
+
+async function deriveBits(
+  password: string,
+  salt: Uint8Array,
+  iterations = ITERATIONS,
+): Promise<ArrayBuffer> {
+  const baseKey = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+
+  return crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+    baseKey,
+    KEY_LENGTH * 8,
+  );
 }
 
 async function deriveKey(
