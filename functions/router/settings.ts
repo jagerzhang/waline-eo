@@ -19,6 +19,35 @@ const ALLOWED_KEYS = new Set([
   'worker_display',
   'geetest_captcha_id',
   'geetest_captcha_key',
+  // Basic settings (migrated from env)
+  'site_name',
+  'site_url',
+  'author_email',
+  'ipqps',
+  'comment_audit',
+  'akismet_key',
+  'disable_region',
+  'disable_useragent',
+  // SMTP
+  'smtp_service',
+  'smtp_host',
+  'smtp_port',
+  'smtp_user',
+  'smtp_pass',
+  'smtp_secure',
+  'sender_name',
+  'sender_email',
+  'mail_subject',
+  'mail_template',
+  'mail_subject_admin',
+  'mail_template_admin',
+  // PushPlus
+  'push_plus_key',
+  'push_plus_topic',
+  'push_plus_template',
+  'push_plus_channel',
+  'push_plus_webhook',
+  'push_plus_callbackurl',
 ]);
 
 /**

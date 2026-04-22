@@ -18,8 +18,23 @@ export interface Env {
   SMTP_PORT?: string;
   SMTP_USER?: string;
   SMTP_PASS?: string;
+  SMTP_SECURE?: string;
   SENDER_NAME?: string;
   SENDER_EMAIL?: string;
+
+  // Mail templates
+  MAIL_SUBJECT?: string;
+  MAIL_TEMPLATE?: string;
+  MAIL_SUBJECT_ADMIN?: string;
+  MAIL_TEMPLATE_ADMIN?: string;
+
+  // PushPlus
+  PUSH_PLUS_KEY?: string;
+  PUSH_PLUS_TOPIC?: string;
+  PUSH_PLUS_TEMPLATE?: string;
+  PUSH_PLUS_CHANNEL?: string;
+  PUSH_PLUS_WEBHOOK?: string;
+  PUSH_PLUS_CALLBACKURL?: string;
 
   // OAuth
   OAUTH_URL?: string;

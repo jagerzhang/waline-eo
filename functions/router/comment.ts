@@ -3,7 +3,9 @@ import type { Env, Variables } from '../env.js';
 import { getAvatar } from '../utils/avatar.js';
 import { parseUA } from '../utils/ua.js';
 import { renderMarkdown } from '../utils/markdown.js';
-import { getSetting } from './settings.js';
+import { getSetting, getSettings } from './settings.js';
+import { sendMail, buildMailSubject, buildMailHtml } from '../utils/mail.js';
+import { sendPushPlus } from '../utils/pushplus.js';
 import {
   createComment,
   getCommentById,
@@ -86,6 +88,20 @@ commentRoutes.post('/', async (c) => {
   const ip = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || '';
   const userInfo = c.get('userInfo');
 
+  // IPQPS rate limit
+  const ipqpsRaw = (await getSetting('ipqps').catch(() => null)) || c.env.IPQPS;
+  const ipqps = ipqpsRaw ? parseInt(String(ipqpsRaw)) : 60;
+  if (ipqps > 0 && ip) {
+    const lastKey = `ipqps:${ip}`;
+    const lastStr = await WALINE_KV.get(lastKey);
+    const lastTime = lastStr ? parseInt(lastStr) : 0;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (lastTime && nowSec - lastTime < ipqps) {
+      const waitSec = lastTime + ipqps - nowSec;
+      return c.json({ errno: 1, errmsg: `评论发布太频繁，请 ${waitSec} 秒后再试` }, 429);
+    }
+  }
+
   // Determine initial status:
   // - comment_default_status setting: anonymous users
   // - user_comment_default_status setting: logged-in users
@@ -98,10 +114,13 @@ commentRoutes.post('/', async (c) => {
     const defaultStatus = await getSetting('comment_default_status').catch(() => null);
     if (defaultStatus === 'waiting' || defaultStatus === 'approved') {
       status = defaultStatus;
-    } else if (c.env.COMMENT_AUDIT || c.env.AUDIT) {
-      status = 'waiting';
     } else {
-      status = 'approved';
+      const auditSetting = await getSetting('comment_audit').catch(() => null);
+      if (auditSetting === 'true' || c.env.COMMENT_AUDIT || c.env.AUDIT) {
+        status = 'waiting';
+      } else {
+        status = 'approved';
+      }
     }
   }
 
@@ -123,9 +142,140 @@ commentRoutes.post('/', async (c) => {
     url,
   });
 
+  // Record IP last comment timestamp for IPQPS
+  if (ipqps > 0 && ip) {
+    await WALINE_KV.put(`ipqps:${ip}`, String(Math.floor(Date.now() / 1000)));
+  }
+
+  // ---- Notifications (async, non-blocking) ----
+  const notifyTask = async () => {
+    try {
+      // Load settings from KV (fall back to env)
+      const settingKeys = [
+        'smtp_service', 'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_secure',
+        'sender_name', 'sender_email', 'author_email',
+        'mail_subject', 'mail_template', 'mail_subject_admin', 'mail_template_admin',
+        'push_plus_key', 'push_plus_topic', 'push_plus_template', 'push_plus_channel',
+        'push_plus_webhook', 'push_plus_callbackurl',
+        'site_name', 'site_url',
+      ];
+      const kvSettings = await getSettings(settingKeys);
+      const cfg = (key: string) => kvSettings[key] || (c.env as any)[key.toUpperCase()] || '';
+
+      const authorEmail = (cfg('author_email') || '').toLowerCase().trim();
+      const commenterMail = (newComment.mail || '').toLowerCase().trim();
+      const isAuthor = authorEmail && commenterMail === authorEmail;
+      const siteName = cfg('site_name') || 'Waline';
+      const siteUrl = cfg('site_url') || '';
+
+      // Resolve parent comment if this is a reply
+      let parentComment: any = null;
+      if (newComment.pid || newComment.rid) {
+        parentComment = await getCommentById(newComment.pid || newComment.rid || 0);
+      }
+
+      // ----- Mail notification -----
+      const mailEnabled = !!(cfg('smtp_user') && cfg('smtp_pass'));
+      if (mailEnabled) {
+        const mailConfig = {
+          smtpService: cfg('smtp_service'),
+          smtpHost: cfg('smtp_host'),
+          smtpPort: cfg('smtp_port'),
+          smtpSecure: cfg('smtp_secure'),
+          smtpUser: cfg('smtp_user'),
+          smtpPass: cfg('smtp_pass'),
+          senderName: cfg('sender_name'),
+          senderEmail: cfg('sender_email'),
+        };
+
+        const defaultReplySubject = '您在 {{site.name}} 的评论有了新的回复';
+        const defaultReplyTemplate = '<p>您好，{{parent.nick}}：</p><p>{{comment.nick}} 回复了您的评论：</p><blockquote>{{comment.content}}</blockquote><p><a href="{{site.url}}">点击此处查看</a></p>';
+        const defaultAdminSubject = '{{site.name}} 上有新评论';
+        const defaultAdminTemplate = '<p>新评论来自 {{comment.nick}}（{{comment.mail}}）：</p><blockquote>{{comment.content}}</blockquote><p>页面：{{comment.url}}</p><p><a href="{{site.url}}">点击此处查看</a></p>';
+
+        const vars: Record<string, string> = {
+          'site.name': siteName,
+          'site.url': siteUrl,
+          'comment.nick': newComment.nick || '',
+          'comment.mail': newComment.mail || '',
+          'comment.content': newComment.comment || '',
+          'comment.orig': newComment.orig || '',
+          'comment.url': newComment.url || '',
+          'parent.nick': parentComment?.nick || '',
+          'parent.content': parentComment?.comment || '',
+          'parent.mail': parentComment?.mail || '',
+        };
+
+        // Reply notification
+        if (parentComment && parentComment.mail && parentComment.mail.toLowerCase() !== commenterMail) {
+          try {
+            await sendMail(mailConfig, {
+              to: parentComment.mail,
+              subject: buildMailSubject(cfg('mail_subject') || defaultReplySubject, vars),
+              html: buildMailHtml(cfg('mail_template') || defaultReplyTemplate, vars),
+            });
+          } catch (e) {
+            console.error('[Mail Reply Error]', e);
+          }
+        }
+
+        // Admin notification (skip if author posted the comment)
+        if (!isAuthor && authorEmail) {
+          try {
+            await sendMail(mailConfig, {
+              to: authorEmail,
+              subject: buildMailSubject(cfg('mail_subject_admin') || defaultAdminSubject, vars),
+              html: buildMailHtml(cfg('mail_template_admin') || defaultAdminTemplate, vars),
+            });
+          } catch (e) {
+            console.error('[Mail Admin Error]', e);
+          }
+        }
+      }
+
+      // ----- PushPlus notification -----
+      const pushToken = cfg('push_plus_key');
+      if (pushToken && !isAuthor) {
+        try {
+          const ppConfig = {
+            token: pushToken,
+            topic: cfg('push_plus_topic') || undefined,
+            template: cfg('push_plus_template') || undefined,
+            channel: cfg('push_plus_channel') || undefined,
+            webhook: cfg('push_plus_webhook') || undefined,
+            callbackUrl: cfg('push_plus_callbackurl') || undefined,
+          };
+          const ppTitle = parentComment
+            ? `${siteName} - 评论回复`
+            : `${siteName} - 新评论`;
+          const ppContent = [
+            `<b>评论者：</b>${newComment.nick || '匿名'}（${newComment.mail || '无邮箱'}）`,
+            `<b>页面：</b>${newComment.url || ''}`,
+            `<b>内容：</b><br>${newComment.comment || ''}`,
+          ].join('<br>');
+          await sendPushPlus(ppConfig, ppTitle, ppContent);
+        } catch (e) {
+          console.error('[PushPlus Error]', e);
+        }
+      }
+    } catch (e) {
+      console.error('[Notification Error]', e);
+    }
+  };
+
+  // Fire-and-forget notification (EdgeOne Pages may not support waitUntil, but we try)
+  const notifyPromise = notifyTask().catch((err) => console.error('[Notify Task Error]', err));
+  if ((c as any).executionCtx?.waitUntil) {
+    (c as any).executionCtx.waitUntil(notifyPromise);
+  }
+
+  const successMsg = status === 'waiting'
+    ? '评论提交成功，待博主审核后才会显示。博主的回复会通过您填写的邮箱发送邮件通知你。'
+    : '评论提交成功';
+
   return c.json({
     errno: 0,
-    errmsg: '',
+    errmsg: successMsg,
     data: await formatComment(newComment, false, c.env),
   }, 201);
 });
@@ -239,8 +389,12 @@ commentRoutes.get('/rss', async (c) => {
   const count = parseInt(c.req.query('count') || '20');
   const limit = Math.min(Math.max(Number.isFinite(count) ? count : 20, 1), 50);
 
-  const siteUrl = c.env.SITE_URL || '';
-  const siteName = c.env.SITE_NAME || 'Waline';
+  const [kvSiteUrl, kvSiteName] = await Promise.all([
+    getSetting('site_url').catch(() => null),
+    getSetting('site_name').catch(() => null),
+  ]);
+  const siteUrl = kvSiteUrl || c.env.SITE_URL || '';
+  const siteName = kvSiteName || c.env.SITE_NAME || 'Waline';
 
   let comments: any[] = [];
 
@@ -467,7 +621,13 @@ async function getAdminCommentList(c: any) {
 
 async function formatComment(row: any, isAdmin = false, env?: Env) {
   if (!row) return null;
-  const disableUA = env?.DISABLE_USERAGENT === 'true';
+  // Read KV settings with env fallback
+  const [disableUARaw, authorEmailRaw] = await Promise.all([
+    getSetting('disable_useragent').catch(() => null),
+    getSetting('author_email').catch(() => null),
+  ]);
+  const disableUA = (disableUARaw === 'true') || env?.DISABLE_USERAGENT === 'true';
+  const authorEmail = (authorEmailRaw || env?.AUTHOR_EMAIL || '').toLowerCase().trim();
   const { browser, os } = disableUA ? { browser: '', os: '' } : parseUA(row.ua || '');
   const avatar = await getAvatar(row.mail || '');
   const result: Record<string, any> = {
@@ -492,7 +652,7 @@ async function formatComment(row: any, isAdmin = false, env?: Env) {
   };
 
   // Author email badge
-  if (env?.AUTHOR_EMAIL && row.mail && row.mail.toLowerCase() === env.AUTHOR_EMAIL.toLowerCase()) {
+  if (authorEmail && row.mail && row.mail.toLowerCase() === authorEmail) {
     result.label = '博主';
   }
 

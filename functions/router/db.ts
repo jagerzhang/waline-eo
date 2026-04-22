@@ -70,6 +70,7 @@ dbRoutes.use('*', async (c, next) => {
  */
 dbRoutes.get('/', async (c) => {
   const exportData: any = {
+    __version: '1.31.13',
     type: 'waline',
     version: 1,
     time: Date.now(),
@@ -83,20 +84,63 @@ dbRoutes.get('/', async (c) => {
 
   const comments = await getAllComments();
   exportData.data.Comment = comments.map((row: any) => ({
-    ...row,
-    objectId: String(row.id),
+    user_id: row.user_id ?? null,
+    comment: row.comment ?? '',
+    orig: row.orig || row.comment || '',
+    insertedAt: row.insertedAt ?? '',
+    ip: row.ip ?? '',
+    link: row.link ?? '',
+    mail: row.mail ?? '',
+    nick: row.nick ?? '',
+    pid: row.pid ?? null,
+    rid: row.rid ?? null,
+    sticky: row.sticky ?? null,
+    status: row.status ?? 'approved',
+    like: row.like ?? null,
+    ua: row.ua ?? '',
+    url: row.url ?? '',
+    createdAt: row.createdAt ?? '',
+    updatedAt: row.updatedAt ?? '',
+    objectId: row.id,
   }));
 
   const counters = await getAllCounters();
   exportData.data.Counter = counters.map((row: any) => ({
-    ...row,
-    objectId: String(row.id),
+    time: row.time ?? 0,
+    reaction0: row.reaction0 ?? 0,
+    reaction1: row.reaction1 ?? 0,
+    reaction2: row.reaction2 ?? 0,
+    reaction3: row.reaction3 ?? 0,
+    reaction4: row.reaction4 ?? 0,
+    reaction5: row.reaction5 ?? 0,
+    reaction6: row.reaction6 ?? 0,
+    reaction7: row.reaction7 ?? 0,
+    reaction8: row.reaction8 ?? 0,
+    url: row.url ?? '',
+    createdAt: row.createdAt ?? '',
+    updatedAt: row.updatedAt ?? '',
+    objectId: row.id,
   }));
 
   const users = await getAllUsers();
   exportData.data.Users = users.map((row: any) => ({
-    ...row,
-    objectId: String(row.id),
+    display_name: row.display_name ?? '',
+    email: row.email ?? '',
+    password: row.password ?? '',
+    type: row.type ?? 'guest',
+    label: row.label ?? '',
+    url: row.url ?? '',
+    avatar: row.avatar || null,
+    github: row.github || null,
+    twitter: row.twitter || null,
+    facebook: row.facebook || null,
+    google: row.google || null,
+    weibo: row.weibo || null,
+    qq: row.qq || null,
+    '2fa': row['2fa'] || null,
+    createdAt: row.createdAt ?? '',
+    updatedAt: row.updatedAt ?? '',
+    objectId: row.id,
   }));
 
   return c.json({ errno: 0, data: exportData });

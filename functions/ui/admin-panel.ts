@@ -1,6 +1,6 @@
 /**
  * Admin Panel - loads @waline/admin from CDN (matching original Waline implementation)
- * Includes Worker branding and menu injection based on worker_display setting
+ * Includes EdgeOne branding and menu injection based on worker_display setting
  * Menu injection uses client-side API check (server-side auth validation) so it
  * works on first login without page refresh
  */
@@ -11,8 +11,12 @@ export async function getAdminPage(env: Env, requestUrl: string): Promise<string
   const workerDisplay = await getSetting('worker_display').catch(() => null) || 'admin';
   const url = new URL(requestUrl);
   const serverURL = `${url.origin}/api/`;
-  const siteName = env.SITE_NAME || '';
-  const siteUrl = env.SITE_URL || '';
+  const [kvSiteName, kvSiteUrl] = await Promise.all([
+    getSetting('site_name').catch(() => null),
+    getSetting('site_url').catch(() => null),
+  ]);
+  const siteName = kvSiteName || env.SITE_NAME || '';
+  const siteUrl = kvSiteUrl || env.SITE_URL || '';
   const recaptchaV3Key = env.RECAPTCHA_V3_KEY || '';
   const turnstileKey = env.TURNSTILE_KEY || '';
   const origin = url.origin;
@@ -56,14 +60,27 @@ ${showWorker ? `  <script>
 
     function addMenu(tk) {
       if (menuDone) return;
-      var nav = document.querySelector('#typecho-nav-list .child');
+      // Try multiple selectors for Waline admin nav
+      var navSelectors = [
+        '#typecho-nav-list .child',
+        '.typecho-head-nav .nav-links',
+        '.typecho-head-nav .inner',
+        '#typecho-nav-list',
+        '.head-nav .nav',
+        '[class*="nav"] [class*="child"]',
+      ];
+      var nav = null;
+      for (var i = 0; i < navSelectors.length; i++) {
+        nav = document.querySelector(navSelectors[i]);
+        if (nav) break;
+      }
       if (!nav) return;
       menuDone = true;
       var li = document.createElement('li');
       li.className = 'last';
       var a = document.createElement('a');
       a.href = '/ui/worker-setting?token=' + encodeURIComponent(tk);
-      a.textContent = 'EdgeOne';
+      a.textContent = 'EdgeOne 设置';
       li.appendChild(a);
       nav.appendChild(li);
     }
@@ -87,8 +104,9 @@ ${showWorker ? `  <script>
 
     var ob = new MutationObserver(function(){ tryInject(); });
     ob.observe(document.body, { childList: true, subtree: true });
-    var iv = setInterval(function(){ tryInject(); if (menuDone) clearInterval(iv); }, 2000);
-    setTimeout(tryInject, 500);
+    var iv = setInterval(function(){ tryInject(); if (menuDone && badgeDone) clearInterval(iv); }, 1500);
+    setTimeout(tryInject, 300);
+    setTimeout(function(){ clearInterval(iv); }, 60000);
   })();
   </script>` : ''}
 </body>

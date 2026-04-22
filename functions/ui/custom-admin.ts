@@ -1,5 +1,5 @@
 /**
- * Worker Settings Page - Typecho-style admin page for non-standard Waline features
+ * EdgeOne Settings Page - Typecho-style admin page for non-standard Waline features
  * Served at /ui/worker-setting, server-side auth-gated (only admins see this page)
  */
 
@@ -27,7 +27,7 @@ export function getCustomSettingsPage(requestUrl: string): string {
 <html>
 <head>
 <meta charset="utf-8">
-<title>Worker Settings - Waline Management</title>
+<title>EdgeOne Settings - Waline Management</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
 /* Typecho admin theme */
@@ -64,13 +64,13 @@ a{color:#467b96;text-decoration:none}a:hover{color:#499bc3}
 .typecho-option .typecho-label{display:block;margin-bottom:.5em;font-weight:bold;font-size:13px}
 .typecho-option .description{margin:.5em 0 0;color:#999;font-size:12px}
 
-input[type="text"],input[type="password"],input[type="url"],textarea,select{
+input[type="text"],input[type="password"],input[type="url"],input[type="number"],textarea,select{
   background:#fff;border:1px solid #d9d9d6;padding:7px;border-radius:2px;font-size:13px;font-family:inherit;outline:none;
 }
-input[type="text"]:focus,input[type="password"]:focus,input[type="url"]:focus,textarea:focus,select:focus{
+input[type="text"]:focus,input[type="password"]:focus,input[type="url"]:focus,input[type="number"]:focus,textarea:focus,select:focus{
   border-color:#467b96;box-shadow:0 0 0 2px rgba(70,123,150,.15);
 }
-input[type="text"],input[type="password"],input[type="url"]{width:100%;max-width:480px}
+input[type="text"],input[type="password"],input[type="url"],input[type="number"]{width:100%;max-width:480px}
 textarea{width:100%;max-width:480px;resize:vertical;min-height:80px;line-height:1.5}
 select{height:32px;min-width:200px}
 
@@ -116,7 +116,7 @@ select{height:32px;min-width:200px}
 <div class="typecho-head-nav">
   <div class="inner">
     <div class="nav-links">
-      <span style="color:#fff;font-size:13px;padding:0 20px">Waline On Worker 设置</span>
+      <span style="color:#fff;font-size:13px;padding:0 20px">Waline On EdgeOne 设置</span>
     </div>
     <div class="operate">
       <a href="/ui">← 返回管理面板</a>
@@ -129,7 +129,10 @@ select{height:32px;min-width:200px}
   <!-- Tab bar -->
   <ul class="typecho-option-tabs" id="tabs">
     <li class="active"><a href="#" data-tab="frontend">前端版本</a></li>
+    <li><a href="#" data-tab="basic">基础设置</a></li>
     <li><a href="#" data-tab="comment">评论策略</a></li>
+    <li><a href="#" data-tab="email">邮件通知</a></li>
+    <li><a href="#" data-tab="pushplus">PushPlus</a></li>
   </ul>
 
   <!-- Tab: Frontend Version -->
@@ -153,7 +156,67 @@ select{height:32px;min-width:200px}
         <option value="admin" selected>仅管理员登录</option>
         <option value="disabled">禁用</option>
       </select>
-      <p class="description">控制 Waline on Worker 标识在页面和控制台中的可见性。「始终」对所有人可见，「仅管理员」仅管理员登录后可见，「禁用」完全隐藏。</p>
+      <p class="description">控制 Waline on EdgeOne 标识在页面和控制台中的可见性。「始终」对所有人可见，「仅管理员」仅管理员登录后可见，「禁用」完全隐藏。</p>
+    </div>
+  </div>
+
+  <!-- Tab: Basic Settings -->
+  <div class="typecho-table-wrap tab-panel" id="tab-basic" style="display:none">
+    <div class="typecho-option">
+      <label class="typecho-label">站点名称</label>
+      <input type="text" id="set-site-name" placeholder="我的博客" />
+      <p class="description">用于邮件、RSS 和通知消息中的网站名称。</p>
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">站点地址</label>
+      <input type="url" id="set-site-url" placeholder="https://example.com" />
+      <p class="description">网站完整地址，用于邮件和 RSS 链接。需以 https:// 开头。</p>
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">博主邮箱</label>
+      <input type="text" id="set-author-email" placeholder="admin@example.com" />
+      <p class="description">博主邮箱地址。新评论通知会发送到此邮箱；评论者邮箱与此相同时会标记为「博主」。</p>
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">评论间隔限制（秒）</label>
+      <input type="number" id="set-ipqps" placeholder="60" />
+      <p class="description">同一 IP 发表评论的最小间隔秒数，填 0 表示不限制。</p>
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">强制评论审核</label>
+      <div class="toggle-row">
+        <label class="toggle">
+          <input type="checkbox" id="set-comment-audit" />
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label">开启后所有匿名评论默认进入待审核状态</span>
+      </div>
+      <p class="description">此开关开启时，匿名评论默认状态为 waiting。已登录用户不受此影响（由「评论策略」tab 控制）。</p>
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">Akismet API Key</label>
+      <input type="text" id="set-akismet-key" placeholder="可选，用于垃圾评论检测" />
+      <p class="description">填写后启用 Akismet 反垃圾评论检测。留空则不启用。</p>
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">禁用地区解析</label>
+      <div class="toggle-row">
+        <label class="toggle">
+          <input type="checkbox" id="set-disable-region" />
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label">关闭评论中的地区信息展示</span>
+      </div>
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">禁用 UA 解析</label>
+      <div class="toggle-row">
+        <label class="toggle">
+          <input type="checkbox" id="set-disable-useragent" />
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label">关闭评论中的浏览器/操作系统信息展示</span>
+      </div>
     </div>
   </div>
 
@@ -175,6 +238,102 @@ select{height:32px;min-width:200px}
         <option value="waiting">等待审核 (waiting)</option>
       </select>
       <p class="description">已登录用户发表评论的默认状态。</p>
+    </div>
+  </div>
+
+  <!-- Tab: Email Notification -->
+  <div class="typecho-table-wrap tab-panel" id="tab-email" style="display:none">
+    <h4 style="margin:0 0 16px;font-size:14px;color:#444;border-bottom:1px solid #eee;padding-bottom:8px">SMTP 设置</h4>
+    <div class="typecho-option">
+      <label class="typecho-label">SMTP 服务</label>
+      <select id="set-smtp-service">
+        <option value="">原生 SMTP</option>
+        <option value="resend">Resend (HTTP API)</option>
+        <option value="sendgrid">SendGrid (HTTP API)</option>
+      </select>
+      <p class="description">邮件发送方式。Resend / SendGrid 不需要填写下方主机端口，只需填写用户名/密码（API Key）。</p>
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">SMTP 服务器地址</label>
+      <input type="text" id="set-smtp-host" placeholder="smtp.example.com" />
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">SMTP 服务器端口</label>
+      <input type="number" id="set-smtp-port" placeholder="465" />
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">SMTP 用户名</label>
+      <input type="text" id="set-smtp-user" placeholder="user@example.com" />
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">SMTP 密码 / API Key</label>
+      <input type="password" id="set-smtp-pass" placeholder="password or api key" />
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">使用 SSL</label>
+      <select id="set-smtp-secure">
+        <option value="1" selected>是 (SSL/TLS)</option>
+        <option value="0">否</option>
+      </select>
+      <p class="description">465 端口通常使用 SSL；587 端口通常不使用。</p>
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">发件人名称</label>
+      <input type="text" id="set-sender-name" placeholder="Waline" />
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">发件人邮箱</label>
+      <input type="text" id="set-sender-email" placeholder="noreply@example.com" />
+    </div>
+
+    <h4 style="margin:24px 0 16px;font-size:14px;color:#444;border-bottom:1px solid #eee;padding-bottom:8px">邮件模板</h4>
+    <div class="typecho-option">
+      <label class="typecho-label">评论回复邮件标题</label>
+      <input type="text" id="set-mail-subject" placeholder="您在 {{site.name}} 的评论有了新的回复" />
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">评论回复邮件内容</label>
+      <textarea id="set-mail-template" rows="4" placeholder="<p>您好，{{parent.nick}}：</p><p>{{comment.nick}} 回复了您的评论...</p>"></textarea>
+      <p class="description">可用变量：{{site.name}} {{site.url}} {{comment.nick}} {{comment.mail}} {{comment.content}} {{comment.url}} {{parent.nick}} {{parent.content}}</p>
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">新评论通知邮件标题</label>
+      <input type="text" id="set-mail-subject-admin" placeholder="{{site.name}} 上有新评论" />
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">新评论通知邮件内容</label>
+      <textarea id="set-mail-template-admin" rows="4" placeholder="<p>新评论来自 {{comment.nick}}...</p>"></textarea>
+      <p class="description">可用变量同上。</p>
+    </div>
+  </div>
+
+  <!-- Tab: PushPlus -->
+  <div class="typecho-table-wrap tab-panel" id="tab-pushplus" style="display:none">
+    <h4 style="margin:0 0 16px;font-size:14px;color:#444;border-bottom:1px solid #eee;padding-bottom:8px">PushPlus 推送设置</h4>
+    <div class="typecho-option">
+      <label class="typecho-label">用户令牌 (token)</label>
+      <input type="text" id="set-push-plus-key" placeholder="从 pushplus.plus 获取的 token" />
+      <p class="description">必填。没有 token 将不会推送。</p>
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">群组编码 (topic)</label>
+      <input type="text" id="set-push-plus-topic" placeholder="可选" />
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">发送模板</label>
+      <input type="text" id="set-push-plus-template" placeholder="html" />
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">发送渠道</label>
+      <input type="text" id="set-push-plus-channel" placeholder="wechat" />
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">Webhook 编码</label>
+      <input type="text" id="set-push-plus-webhook" placeholder="仅在 channel 为 webhook 时填写" />
+    </div>
+    <div class="typecho-option">
+      <label class="typecho-label">回调地址</label>
+      <input type="text" id="set-push-plus-callbackurl" placeholder="可选" />
     </div>
   </div>
 
@@ -250,13 +409,57 @@ select{height:32px;min-width:200px}
     if (this.value) document.getElementById('set-version').value = this.value;
   });
 
+  function setVal(id, val) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (el.tagName === 'SELECT') {
+      el.value = val || '';
+    } else if (el.type === 'checkbox') {
+      el.checked = !!val;
+    } else {
+      el.value = val || '';
+    }
+  }
+
   // Load settings
   api('/settings').then(function(sr) {
     var s = sr.data || {};
-    document.getElementById('set-version').value = s.waline_client_version || 'v3';
-    document.getElementById('set-comment-status').value = s.comment_default_status || 'approved';
-    document.getElementById('set-user-comment-status').value = s.user_comment_default_status || 'approved';
-    document.getElementById('set-worker-display').value = s.worker_display || 'admin';
+    setVal('set-version', s.waline_client_version);
+    setVal('set-comment-status', s.comment_default_status);
+    setVal('set-user-comment-status', s.user_comment_default_status);
+    setVal('set-worker-display', s.worker_display);
+
+    // Basic settings
+    setVal('set-site-name', s.site_name);
+    setVal('set-site-url', s.site_url);
+    setVal('set-author-email', s.author_email);
+    setVal('set-ipqps', s.ipqps);
+    setVal('set-comment-audit', s.comment_audit === 'true');
+    setVal('set-akismet-key', s.akismet_key);
+    setVal('set-disable-region', s.disable_region === 'true');
+    setVal('set-disable-useragent', s.disable_useragent === 'true');
+
+    // Email
+    setVal('set-smtp-service', s.smtp_service);
+    setVal('set-smtp-host', s.smtp_host);
+    setVal('set-smtp-port', s.smtp_port);
+    setVal('set-smtp-user', s.smtp_user);
+    setVal('set-smtp-pass', s.smtp_pass);
+    setVal('set-smtp-secure', s.smtp_secure);
+    setVal('set-sender-name', s.sender_name);
+    setVal('set-sender-email', s.sender_email);
+    setVal('set-mail-subject', s.mail_subject);
+    setVal('set-mail-template', s.mail_template);
+    setVal('set-mail-subject-admin', s.mail_subject_admin);
+    setVal('set-mail-template-admin', s.mail_template_admin);
+
+    // PushPlus
+    setVal('set-push-plus-key', s.push_plus_key);
+    setVal('set-push-plus-topic', s.push_plus_topic);
+    setVal('set-push-plus-template', s.push_plus_template);
+    setVal('set-push-plus-channel', s.push_plus_channel);
+    setVal('set-push-plus-webhook', s.push_plus_webhook);
+    setVal('set-push-plus-callbackurl', s.push_plus_callbackurl);
 
     // Match selected version in dropdown
     var sel = document.getElementById('version-select');
@@ -276,12 +479,40 @@ select{height:32px;min-width:200px}
       comment_default_status: document.getElementById('set-comment-status').value,
       user_comment_default_status: document.getElementById('set-user-comment-status').value,
       worker_display: document.getElementById('set-worker-display').value,
+      // Basic settings
+      site_name: document.getElementById('set-site-name').value.trim(),
+      site_url: document.getElementById('set-site-url').value.trim(),
+      author_email: document.getElementById('set-author-email').value.trim(),
+      ipqps: document.getElementById('set-ipqps').value.trim(),
+      comment_audit: document.getElementById('set-comment-audit').checked ? 'true' : 'false',
+      akismet_key: document.getElementById('set-akismet-key').value.trim(),
+      disable_region: document.getElementById('set-disable-region').checked ? 'true' : 'false',
+      disable_useragent: document.getElementById('set-disable-useragent').checked ? 'true' : 'false',
+      // Email
+      smtp_service: document.getElementById('set-smtp-service').value,
+      smtp_host: document.getElementById('set-smtp-host').value.trim(),
+      smtp_port: document.getElementById('set-smtp-port').value.trim(),
+      smtp_user: document.getElementById('set-smtp-user').value.trim(),
+      smtp_pass: document.getElementById('set-smtp-pass').value.trim(),
+      smtp_secure: document.getElementById('set-smtp-secure').value,
+      sender_name: document.getElementById('set-sender-name').value.trim(),
+      sender_email: document.getElementById('set-sender-email').value.trim(),
+      mail_subject: document.getElementById('set-mail-subject').value.trim(),
+      mail_template: document.getElementById('set-mail-template').value.trim(),
+      mail_subject_admin: document.getElementById('set-mail-subject-admin').value.trim(),
+      mail_template_admin: document.getElementById('set-mail-template-admin').value.trim(),
+      // PushPlus
+      push_plus_key: document.getElementById('set-push-plus-key').value.trim(),
+      push_plus_topic: document.getElementById('set-push-plus-topic').value.trim(),
+      push_plus_template: document.getElementById('set-push-plus-template').value.trim(),
+      push_plus_channel: document.getElementById('set-push-plus-channel').value.trim(),
+      push_plus_webhook: document.getElementById('set-push-plus-webhook').value.trim(),
+      push_plus_callbackurl: document.getElementById('set-push-plus-callbackurl').value.trim(),
     };
     api('/settings', { method: 'PUT', body: JSON.stringify(settings) }).then(function(r) {
       toast(r.errno ? (r.errmsg || '保存失败') : '设置已保存！', !r.errno);
     }).catch(function(){ toast('保存失败', false); });
   });
-
 })();
 </script>
 </body>
