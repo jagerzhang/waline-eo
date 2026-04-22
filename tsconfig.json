@@ -13,8 +13,8 @@
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx",
     "lib": ["ESNext"],
-    "types": []
+    "types": ["@edgeone/ef-types"]
   },
-  "include": ["edge-functions"],
+  "include": ["functions"],
   "exclude": ["node_modules", "waline"]
 }
