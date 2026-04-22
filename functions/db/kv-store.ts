@@ -115,6 +115,10 @@ async function removeId(key: string, id: number): Promise<void> {
   }
 }
 
+function listKeyName(k: ListKey): string {
+  return k.name || k.key || '';
+}
+
 async function getNextId(metaKey: string): Promise<number> {
   const current = await WALINE_KV.get(metaKey);
   const id = current ? parseInt(current) : 1;
@@ -377,7 +381,7 @@ export async function clearComments(): Promise<void> {
   // Clean known meta keys
   const list = await WALINE_KV.list({ prefix: 'index:comments:' });
   for (const key of list.keys) {
-    await WALINE_KV.delete(key.name);
+    await WALINE_KV.delete(listKeyName(key));
   }
   await WALINE_KV.put('meta:next_comment_id', '1');
 }
@@ -442,8 +446,8 @@ export async function getAllCounters(): Promise<KVCounter[]> {
   for (const key of list.keys) {
     // list with prefix 'counter:' should only return counter:* keys,
     // but guard against any unexpected keys just in case.
-    if (!key.name.startsWith('counter:') || key.name === 'counter:') continue;
-    const c = await getJson<KVCounter>(key.name);
+    if (!listKeyName(key).startsWith('counter:') || listKeyName(key) === 'counter:') continue;
+    const c = await getJson<KVCounter>(listKeyName(key));
     if (c) counters.push(c);
   }
   return counters;
@@ -452,11 +456,11 @@ export async function getAllCounters(): Promise<KVCounter[]> {
 export async function clearCounters(): Promise<void> {
   const list = await WALINE_KV.list({ prefix: 'counter:' });
   for (const key of list.keys) {
-    await WALINE_KV.delete(key.name);
+    await WALINE_KV.delete(listKeyName(key));
   }
   const idList = await WALINE_KV.list({ prefix: 'index:counter:id:' });
   for (const key of idList.keys) {
-    await WALINE_KV.delete(key.name);
+    await WALINE_KV.delete(listKeyName(key));
   }
   await WALINE_KV.put('meta:next_counter_id', '1');
 }
@@ -638,7 +642,7 @@ export async function clearUsers(): Promise<void> {
   await WALINE_KV.delete('index:users:all');
   const list = await WALINE_KV.list({ prefix: 'index:user:' });
   for (const key of list.keys) {
-    await WALINE_KV.delete(key.name);
+    await WALINE_KV.delete(listKeyName(key));
   }
   await WALINE_KV.put('meta:next_user_id', '1');
 }
@@ -662,9 +666,9 @@ export async function getAllSettings(): Promise<Record<string, string>> {
   const list = await WALINE_KV.list({ prefix: 'setting:' });
   const settings: Record<string, string> = {};
   for (const key of list.keys) {
-    const val = await WALINE_KV.get(key.name);
+    const val = await WALINE_KV.get(listKeyName(key));
     if (val !== null) {
-      const shortKey = key.name.slice('setting:'.length);
+      const shortKey = listKeyName(key).slice('setting:'.length);
       settings[shortKey] = val;
     }
   }
@@ -684,6 +688,6 @@ export async function setSettings(settings: Record<string, string>): Promise<voi
 export async function clearSettings(): Promise<void> {
   const list = await WALINE_KV.list({ prefix: 'setting:' });
   for (const key of list.keys) {
-    await WALINE_KV.delete(key.name);
+    await WALINE_KV.delete(listKeyName(key));
   }
 }

@@ -5,7 +5,8 @@ interface ListResult {
   keys: Array<ListKey>;
 }
 interface ListKey {
-  key: string;
+  key?: string;
+  name?: string;
 }
 declare class KVNamespace {
   put(key: string, value: string | ArrayBuffer | ArrayBufferView | ReadableStream): Promise<void>;
