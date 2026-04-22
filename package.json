@@ -1,19 +1,30 @@
 {
-  "name": "waline-edgeone",
+  "name": "waline-on-edgeone",
   "version": "1.0.0",
-  "description": "Full-featured Waline for EdgeOne Pages - Compatible with @waline/client v3",
-  "main": "src/index.js",
+  "description": "Waline-compatible comment system backend running on EdgeOne Edge Functions with KV",
+  "type": "module",
   "scripts": {
-    "dev": "wrangler pages dev .",
-    "deploy": "wrangler pages deploy ."
+    "dev": "echo 'EdgeOne local dev not configured'",
+    "deploy": "echo 'Deploy via EdgeOne console or CLI'"
   },
-  "keywords": ["waline", "comment", "edgeone", "kv"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wuyilingwei/Waline_On_Worker.git"
+  },
+  "keywords": [
+    "waline",
+    "edgeone",
+    "comment-system",
+    "kv"
+  ],
+  "author": "wuyilingwei",
   "license": "MIT",
   "dependencies": {
-    "markdown-it": "^14.1.1",
-    "markdown-it-emoji": "^3.0.0"
+    "bcryptjs": "^3.0.3",
+    "hono": "^4.12.9"
   },
   "devDependencies": {
-    "wrangler": "^3.0.0"
+    "@cloudflare/workers-types": "^4.20260329.1",
+    "typescript": "^6.0.2"
   }
 }
