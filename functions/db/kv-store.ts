@@ -128,6 +128,228 @@ async function getNextId(metaKey: string): Promise<number> {
 }
 
 // ---------- Comment Operations ----------
+// 十万条负载优化方案：
+// 1. 根评论按 URL 分页存储 ID（每页 50 条），避免大数组
+// 2. 子评论按 rid 聚合存储完整对象数组（数量通常可控）
+// 3. URL 评论计数独立维护，读取时无需遍历
+// 4. 最近评论只维护 200 条索引
+// 5. 状态索引分页存储（每页 100 条）
+
+const ROOT_PAGE_SIZE = 50;
+const STATUS_PAGE_SIZE = 100;
+const RECENT_LIMIT = 200;
+const USER_RECENT_LIMIT = 100;
+
+// --- 根评论分页 ---
+
+async function getRootPageIds(url: string, page: number): Promise<number[]> {
+  return getJson<number[]>(`comments:url:${url}:root:ids:page:${page}`) || [];
+}
+
+async function setRootPageIds(url: string, page: number, ids: number[]): Promise<void> {
+  await putJson(`comments:url:${url}:root:ids:page:${page}`, ids);
+}
+
+async function getRootPages(url: string): Promise<number> {
+  return (await getJson<number>(`meta:comments:url:${url}:root:pages`)) || 0;
+}
+
+async function setRootPages(url: string, pages: number): Promise<void> {
+  await putJson(`meta:comments:url:${url}:root:pages`, pages);
+}
+
+async function getRootCount(url: string): Promise<number> {
+  return (await getJson<number>(`meta:comments:url:${url}:root:count`)) || 0;
+}
+
+async function setRootCount(url: string, count: number): Promise<void> {
+  await putJson(`meta:comments:url:${url}:root:count`, count);
+}
+
+// 插入到 page:0 开头，溢出时级联到后续页
+async function addRootCommentId(url: string, id: number): Promise<void> {
+  const pages = await getRootPages(url);
+  let page0 = await getRootPageIds(url, 0);
+  page0.unshift(id);
+
+  if (page0.length > ROOT_PAGE_SIZE) {
+    const overflow = page0.splice(ROOT_PAGE_SIZE);
+    await setRootPageIds(url, 0, page0);
+
+    let currentPage = 1;
+    let remaining = overflow;
+    while (remaining.length > 0) {
+      const pageIds = await getRootPageIds(url, currentPage);
+      pageIds.unshift(...remaining);
+      if (pageIds.length > ROOT_PAGE_SIZE) {
+        remaining = pageIds.splice(ROOT_PAGE_SIZE);
+        await setRootPageIds(url, currentPage, pageIds);
+        currentPage++;
+      } else {
+        await setRootPageIds(url, currentPage, pageIds);
+        remaining = [];
+      }
+    }
+
+    await setRootPages(url, Math.max(pages, currentPage + (remaining.length > 0 ? 1 : 0)));
+  } else {
+    await setRootPageIds(url, 0, page0);
+    if (pages === 0) await setRootPages(url, 1);
+  }
+
+  await setRootCount(url, await getRootCount(url) + 1);
+}
+
+async function removeRootCommentId(url: string, id: number): Promise<void> {
+  const pages = await getRootPages(url);
+  for (let page = 0; page < pages; page++) {
+    const ids = await getRootPageIds(url, page);
+    const idx = ids.indexOf(id);
+    if (idx !== -1) {
+      ids.splice(idx, 1);
+      await setRootPageIds(url, page, ids);
+      await setRootCount(url, await getRootCount(url) - 1);
+      return;
+    }
+  }
+}
+
+// --- 子评论聚合 ---
+
+async function getChildComments(rid: number): Promise<KVComment[]> {
+  return getJson<KVComment[]>(`comments:rid:${rid}`) || [];
+}
+
+async function setChildComments(rid: number, comments: KVComment[]): Promise<void> {
+  await putJson(`comments:rid:${rid}`, comments);
+}
+
+async function addChildComment(comment: KVComment): Promise<void> {
+  const children = await getChildComments(comment.rid!);
+  children.push(comment);
+  await setChildComments(comment.rid!, children);
+}
+
+async function removeChildComment(rid: number, id: number): Promise<void> {
+  const children = await getChildComments(rid);
+  const filtered = children.filter((c) => c.id !== id);
+  if (filtered.length !== children.length) {
+    await setChildComments(rid, filtered);
+  }
+}
+
+// --- 评论计数 ---
+
+async function getCommentCount(url: string): Promise<number> {
+  const val = await WALINE_KV.get(`count:comments:url:${url}`);
+  return val ? parseInt(val) : 0;
+}
+
+async function incCommentCount(url: string, delta: number): Promise<void> {
+  if (!url) return;
+  const current = await getCommentCount(url);
+  await WALINE_KV.put(`count:comments:url:${url}`, String(Math.max(0, current + delta)));
+}
+
+// --- 最近评论索引 ---
+
+async function addRecentCommentId(id: number): Promise<void> {
+  const recent = (await getJson<number[]>('index:comments:recent')) || [];
+  recent.unshift(id);
+  if (recent.length > RECENT_LIMIT) recent.length = RECENT_LIMIT;
+  await putJson('index:comments:recent', recent);
+}
+
+async function removeRecentCommentId(id: number): Promise<void> {
+  const recent = (await getJson<number[]>('index:comments:recent')) || [];
+  const filtered = recent.filter((cid) => cid !== id);
+  if (filtered.length !== recent.length) {
+    await putJson('index:comments:recent', filtered);
+  }
+}
+
+// --- 状态索引分页 ---
+
+async function getStatusPageIds(status: string, page: number): Promise<number[]> {
+  return getJson<number[]>(`index:comments:status:${status}:ids:page:${page}`) || [];
+}
+
+async function setStatusPageIds(status: string, page: number, ids: number[]): Promise<void> {
+  await putJson(`index:comments:status:${status}:ids:page:${page}`, ids);
+}
+
+async function getStatusPages(status: string): Promise<number> {
+  return (await getJson<number>(`meta:comments:status:${status}:pages`)) || 0;
+}
+
+async function setStatusPages(status: string, pages: number): Promise<void> {
+  await putJson(`meta:comments:status:${status}:pages`, pages);
+}
+
+async function addStatusCommentId(status: string, id: number): Promise<void> {
+  const pages = await getStatusPages(status);
+  let page0 = await getStatusPageIds(status, 0);
+  page0.unshift(id);
+
+  if (page0.length > STATUS_PAGE_SIZE) {
+    const overflow = page0.splice(STATUS_PAGE_SIZE);
+    await setStatusPageIds(status, 0, page0);
+
+    let currentPage = 1;
+    let remaining = overflow;
+    while (remaining.length > 0) {
+      const pageIds = await getStatusPageIds(status, currentPage);
+      pageIds.unshift(...remaining);
+      if (pageIds.length > STATUS_PAGE_SIZE) {
+        remaining = pageIds.splice(STATUS_PAGE_SIZE);
+        await setStatusPageIds(status, currentPage, pageIds);
+        currentPage++;
+      } else {
+        await setStatusPageIds(status, currentPage, pageIds);
+        remaining = [];
+      }
+    }
+
+    await setStatusPages(status, Math.max(pages, currentPage + (remaining.length > 0 ? 1 : 0)));
+  } else {
+    await setStatusPageIds(status, 0, page0);
+    if (pages === 0) await setStatusPages(status, 1);
+  }
+}
+
+async function removeStatusCommentId(status: string, id: number): Promise<void> {
+  const pages = await getStatusPages(status);
+  for (let page = 0; page < pages; page++) {
+    const ids = await getStatusPageIds(status, page);
+    const idx = ids.indexOf(id);
+    if (idx !== -1) {
+      ids.splice(idx, 1);
+      await setStatusPageIds(status, page, ids);
+      return;
+    }
+  }
+}
+
+// --- 用户评论索引（最近 100 条）---
+
+async function addUserCommentId(userId: number, id: number): Promise<void> {
+  const key = `index:comments:user:${userId}:recent`;
+  const recent = (await getJson<number[]>(key)) || [];
+  recent.unshift(id);
+  if (recent.length > USER_RECENT_LIMIT) recent.length = USER_RECENT_LIMIT;
+  await putJson(key, recent);
+}
+
+async function removeUserCommentId(userId: number, id: number): Promise<void> {
+  const key = `index:comments:user:${userId}:recent`;
+  const recent = (await getJson<number[]>(key)) || [];
+  const filtered = recent.filter((cid) => cid !== id);
+  if (filtered.length !== recent.length) {
+    await putJson(key, filtered);
+  }
+}
+
+// --- 核心 API ---
 
 export async function createComment(data: Partial<KVComment>): Promise<KVComment> {
   const id = await getNextId('meta:next_comment_id');
@@ -155,24 +377,25 @@ export async function createComment(data: Partial<KVComment>): Promise<KVComment
 
   await putJson(`comment:${id}`, comment);
 
-  // Update indexes
-  await addId('index:comments:all', id, true);
-  if (comment.url) {
-    await addId(`index:comments:url:${comment.url}`, id, true);
-    if (comment.status === 'approved' && comment.rid === null && comment.pid === null) {
-      await addId(`index:comments:url:${comment.url}:approved:root`, id, true);
-    }
+  const ops: Promise<void>[] = [
+    addRecentCommentId(id),
+    addStatusCommentId(comment.status, id),
+  ];
+
+  if (comment.url && comment.rid === null && comment.pid === null) {
+    ops.push(addRootCommentId(comment.url, id));
+    ops.push(incCommentCount(comment.url, 1));
   }
+
   if (comment.rid !== null) {
-    await addId(`index:comments:rid:${comment.rid}`, id);
+    ops.push(addChildComment(comment));
   }
-  if (comment.pid !== null) {
-    await addId(`index:comments:pid:${comment.pid}`, id);
-  }
-  await addId(`index:comments:status:${comment.status}`, id, true);
+
   if (comment.user_id !== null) {
-    await addId(`index:comments:user:${comment.user_id}`, id);
+    ops.push(addUserCommentId(comment.user_id, id));
   }
+
+  await Promise.all(ops);
 
   return comment;
 }
@@ -185,53 +408,65 @@ export async function updateComment(id: number, data: Partial<KVComment>): Promi
   const comment = await getCommentById(id);
   if (!comment) return null;
 
+  const oldUrl = comment.url;
   const oldStatus = comment.status;
   const oldRid = comment.rid;
   const oldPid = comment.pid;
-  const oldUrl = comment.url;
+  const oldUserId = comment.user_id;
 
   Object.assign(comment, data);
   comment.updatedAt = nowIso();
   await putJson(`comment:${id}`, comment);
 
-  // Re-index if status changed
-  if (data.status !== undefined && data.status !== oldStatus) {
-    await removeId(`index:comments:status:${oldStatus}`, id);
-    await addId(`index:comments:status:${data.status}`, id, true);
-    if (oldUrl) {
-      if (oldStatus === 'approved' && oldRid === null && oldPid === null) {
-        await removeId(`index:comments:url:${oldUrl}:approved:root`, id);
-      }
-      if (data.status === 'approved' && comment.rid === null && comment.pid === null) {
-        await addId(`index:comments:url:${oldUrl}:approved:root`, id, true);
-      }
-    }
-  }
+  const urlChanged = data.url !== undefined && data.url !== oldUrl;
+  const statusChanged = data.status !== undefined && data.status !== oldStatus;
+  const ridChanged = data.rid !== undefined && data.rid !== oldRid;
+  const pidChanged = data.pid !== undefined && data.pid !== oldPid;
+  const userChanged = data.user_id !== undefined && data.user_id !== oldUserId;
 
-  // Re-index if url changed
-  if (data.url !== undefined && data.url !== oldUrl) {
-    if (oldUrl) {
-      await removeId(`index:comments:url:${oldUrl}`, id);
-      await removeId(`index:comments:url:${oldUrl}:approved:root`, id);
-    }
-    if (data.url) {
-      await addId(`index:comments:url:${data.url}`, id, true);
-      if (comment.status === 'approved' && comment.rid === null && comment.pid === null) {
-        await addId(`index:comments:url:${data.url}:approved:root`, id, true);
-      }
-    }
-  }
+  if (urlChanged || statusChanged || ridChanged || pidChanged) {
+    const removeOps: Promise<void>[] = [
+      removeStatusCommentId(oldStatus, id),
+      removeRecentCommentId(id),
+    ];
 
-  // Re-index if rid changed
-  if (data.rid !== undefined && data.rid !== oldRid) {
-    if (oldRid !== null) await removeId(`index:comments:rid:${oldRid}`, id);
-    if (data.rid !== null) await addId(`index:comments:rid:${data.rid}`, id);
-  }
+    if (oldUrl && oldRid === null && oldPid === null) {
+      removeOps.push(removeRootCommentId(oldUrl, id));
+      removeOps.push(incCommentCount(oldUrl, -1));
+    }
 
-  // Re-index if pid changed
-  if (data.pid !== undefined && data.pid !== oldPid) {
-    if (oldPid !== null) await removeId(`index:comments:pid:${oldPid}`, id);
-    if (data.pid !== null) await addId(`index:comments:pid:${data.pid}`, id);
+    if (oldRid !== null) {
+      removeOps.push(removeChildComment(oldRid, id));
+    }
+
+    if (oldUserId !== null) {
+      removeOps.push(removeUserCommentId(oldUserId, id));
+    }
+
+    await Promise.all(removeOps);
+
+    const addOps: Promise<void>[] = [
+      addStatusCommentId(comment.status, id),
+      addRecentCommentId(id),
+    ];
+
+    if (comment.url && comment.rid === null && comment.pid === null) {
+      addOps.push(addRootCommentId(comment.url, id));
+      addOps.push(incCommentCount(comment.url, 1));
+    }
+
+    if (comment.rid !== null) {
+      addOps.push(addChildComment(comment));
+    }
+
+    if (comment.user_id !== null) {
+      addOps.push(addUserCommentId(comment.user_id, id));
+    }
+
+    await Promise.all(addOps);
+  } else if (userChanged) {
+    if (oldUserId !== null) await removeUserCommentId(oldUserId, id);
+    if (comment.user_id !== null) await addUserCommentId(comment.user_id, id);
   }
 
   return comment;
@@ -242,69 +477,80 @@ export async function deleteCommentById(id: number): Promise<void> {
   if (!comment) return;
 
   await WALINE_KV.delete(`comment:${id}`);
-  await removeId('index:comments:all', id);
-  if (comment.url) {
-    await removeId(`index:comments:url:${comment.url}`, id);
-    await removeId(`index:comments:url:${comment.url}:approved:root`, id);
+
+  const ops: Promise<void>[] = [
+    removeStatusCommentId(comment.status, id),
+    removeRecentCommentId(id),
+  ];
+
+  if (comment.url && comment.rid === null && comment.pid === null) {
+    ops.push(removeRootCommentId(comment.url, id));
+    ops.push(incCommentCount(comment.url, -1));
   }
+
   if (comment.rid !== null) {
-    await removeId(`index:comments:rid:${comment.rid}`, id);
+    ops.push(removeChildComment(comment.rid, id));
   }
-  if (comment.pid !== null) {
-    await removeId(`index:comments:pid:${comment.pid}`, id);
-  }
-  await removeId(`index:comments:status:${comment.status}`, id);
+
   if (comment.user_id !== null) {
-    await removeId(`index:comments:user:${comment.user_id}`, id);
+    ops.push(removeUserCommentId(comment.user_id, id));
   }
+
+  await Promise.all(ops);
 }
 
 export async function deleteCommentsByRid(rid: number): Promise<void> {
-  const ids = await getIds(`index:comments:rid:${rid}`);
-  for (const id of ids) {
-    await deleteCommentById(id);
-  }
+  const children = await getChildComments(rid);
+  await Promise.all(children.map((c) => deleteCommentById(c.id)));
 }
 
 export async function getCommentsByIds(ids: number[]): Promise<KVComment[]> {
-  const comments: KVComment[] = [];
-  for (const id of ids) {
-    const c = await getCommentById(id);
-    if (c) comments.push(c);
-  }
-  return comments;
+  const comments = await Promise.all(ids.map((id) => getCommentById(id)));
+  return comments.filter((c): c is KVComment => c !== null);
 }
 
 export async function getRootCommentsByUrl(
   url: string,
   options: { orderBy: string; limit: number; offset: number },
 ): Promise<{ comments: KVComment[]; total: number }> {
-  const ids = await getIds(`index:comments:url:${url}:approved:root`);
-  // Load all and sort (sticky first, then by orderBy)
-  const comments = await getCommentsByIds(ids);
-  comments.sort((a, b) => {
-    if (b.sticky !== a.sticky) return b.sticky - a.sticky;
-    if (options.orderBy === 'insertedAt ASC') {
-      return a.insertedAt.localeCompare(b.insertedAt);
-    }
-    if (options.orderBy === 'like DESC') {
-      return b.like - a.like;
-    }
-    return b.insertedAt.localeCompare(a.insertedAt);
-  });
-  const total = comments.length;
-  const sliced = comments.slice(options.offset, options.offset + options.limit);
+  const total = await getRootCount(url);
+  if (total === 0) return { comments: [], total: 0 };
+
+  const pages = await getRootPages(url);
+  const pageStart = Math.floor(options.offset / ROOT_PAGE_SIZE);
+  const pageEnd = Math.min(Math.floor((options.offset + options.limit - 1) / ROOT_PAGE_SIZE), pages - 1);
+
+  const allComments: KVComment[] = [];
+  for (let page = pageStart; page <= pageEnd; page++) {
+    const ids = await getRootPageIds(url, page);
+    const comments = await Promise.all(ids.map((id) => getCommentById(id)));
+    allComments.push(...comments.filter((c): c is KVComment => c !== null));
+  }
+
+  const startIdxInPage = options.offset % ROOT_PAGE_SIZE;
+  const sliced = allComments.slice(startIdxInPage, startIdxInPage + options.limit);
+
+  if (options.orderBy === 'insertedAt ASC') {
+    sliced.sort((a, b) => a.insertedAt.localeCompare(b.insertedAt));
+  } else if (options.orderBy === 'like DESC') {
+    sliced.sort((a, b) => b.like - a.like);
+  } else {
+    sliced.sort((a, b) => {
+      if (b.sticky !== a.sticky) return b.sticky - a.sticky;
+      return b.insertedAt.localeCompare(a.insertedAt);
+    });
+  }
+
   return { comments: sliced, total };
 }
 
 export async function getChildCommentsByRids(rids: number[], status?: string): Promise<KVComment[]> {
-  const allIds: number[] = [];
+  const allChildren: KVComment[] = [];
   for (const rid of rids) {
-    const ids = await getIds(`index:comments:rid:${rid}`);
-    allIds.push(...ids);
+    const children = await getChildComments(rid);
+    allChildren.push(...children);
   }
-  const comments = await getCommentsByIds([...new Set(allIds)]);
-  let result = comments;
+  let result = allChildren;
   if (status) {
     result = result.filter((c) => c.status === status);
   }
@@ -313,25 +559,24 @@ export async function getChildCommentsByRids(rids: number[], status?: string): P
 }
 
 export async function getRecentComments(limit: number): Promise<KVComment[]> {
-  const ids = await getIds('index:comments:all');
-  const comments = await getCommentsByIds(ids.slice(0, limit * 2));
+  const ids = (await getJson<number[]>('index:comments:recent')) || [];
+  const comments = await getCommentsByIds(ids.slice(0, Math.min(ids.length, limit * 2)));
   const approved = comments.filter((c) => c.status === 'approved');
   approved.sort((a, b) => b.insertedAt.localeCompare(a.insertedAt));
   return approved.slice(0, limit);
 }
 
-export async function getCommentCountByUrl(url: string, status = 'approved'): Promise<number> {
-  const ids = await getIds(`index:comments:url:${url}`);
-  if (ids.length === 0) return 0;
-  const comments = await getCommentsByIds(ids);
-  return comments.filter((c) => c.status === status).length;
+export async function getCommentCountByUrl(url: string, _status = 'approved'): Promise<number> {
+  return getCommentCount(url);
 }
 
-export async function getCommentCountsByUrls(urls: string[], status = 'approved'): Promise<Record<string, number>> {
+export async function getCommentCountsByUrls(urls: string[]): Promise<Record<string, number>> {
   const map: Record<string, number> = {};
-  for (const url of urls) {
-    map[url] = await getCommentCountByUrl(url, status);
-  }
+  await Promise.all(
+    urls.map(async (url) => {
+      map[url] = await getCommentCount(url);
+    }),
+  );
   return map;
 }
 
@@ -344,48 +589,68 @@ export async function searchComments(
     offset: number;
   },
 ): Promise<{ data: KVComment[]; total: number }> {
-  let ids: number[];
-  if (options.status) {
-    ids = await getIds(`index:comments:status:${options.status}`);
-  } else {
-    ids = await getIds('index:comments:all');
+  const status = options.status || 'approved';
+  const maxScanPages = 5;
+  const pages = await getStatusPages(status);
+  const scanPages = Math.min(pages, maxScanPages);
+
+  const allComments: KVComment[] = [];
+  for (let page = 0; page < scanPages; page++) {
+    const ids = await getStatusPageIds(status, page);
+    const comments = await getCommentsByIds(ids);
+    allComments.push(...comments);
   }
 
-  let comments = await getCommentsByIds(ids);
-
+  let result = allComments;
   if (options.ownerEmail) {
-    comments = comments.filter((c) => c.mail === options.ownerEmail);
+    result = result.filter((c) => c.mail === options.ownerEmail);
   }
   if (options.keyword) {
     const kw = options.keyword.toLowerCase();
-    comments = comments.filter((c) => c.comment.toLowerCase().includes(kw));
+    result = result.filter((c) => c.comment.toLowerCase().includes(kw));
   }
 
-  comments.sort((a, b) => b.insertedAt.localeCompare(a.insertedAt));
-  const total = comments.length;
-  return { data: comments.slice(options.offset, options.offset + options.limit), total };
+  result.sort((a, b) => b.insertedAt.localeCompare(a.insertedAt));
+  const total = result.length;
+  return { data: result.slice(options.offset, options.offset + options.limit), total };
 }
 
 export async function getAllComments(): Promise<KVComment[]> {
-  const ids = await getIds('index:comments:all');
-  return getCommentsByIds(ids);
+  const maxPages = 5;
+  const pages = await getStatusPages('approved');
+  const scanPages = Math.min(pages, maxPages);
+  const allComments: KVComment[] = [];
+  for (let page = 0; page < scanPages; page++) {
+    const ids = await getStatusPageIds('approved', page);
+    const comments = await getCommentsByIds(ids);
+    allComments.push(...comments);
+  }
+  return allComments;
 }
 
 export async function clearComments(): Promise<void> {
-  const ids = await getIds('index:comments:all');
-  for (const id of ids) {
-    await WALINE_KV.delete(`comment:${id}`);
-  }
-  await WALINE_KV.delete('index:comments:all');
-  // Also clear all url/status/... indexes. Simpler: list and delete by prefix
-  // EdgeOne KV list may be available; fallback: we already deleted all entries above.
-  // Clean known meta keys
-  const list = await WALINE_KV.list({ prefix: 'index:comments:' });
-  if (list && list.keys) {
-    for (const key of list.keys) {
-      await WALINE_KV.delete(listKeyName(key));
+  const prefixes = [
+    'comment:',
+    'comments:url:',
+    'comments:rid:',
+    'count:comments:url:',
+    'index:comments:status:',
+    'meta:comments:',
+    'index:comments:user:',
+  ];
+
+  for (const prefix of prefixes) {
+    const list = await WALINE_KV.list({ prefix });
+    if (list && list.keys) {
+      const keys = list.keys.map((k) => listKeyName(k));
+      // EdgeOne KV may have rate limits on deletes; batch in chunks of 50
+      for (let i = 0; i < keys.length; i += 50) {
+        await Promise.all(keys.slice(i, i + 50).map((k) => WALINE_KV.delete(k)));
+      }
     }
   }
+
+  await WALINE_KV.delete('index:comments:recent');
   await WALINE_KV.put('meta:next_comment_id', '1');
 }
 
@@ -500,28 +765,32 @@ export async function createUser(data: Partial<KVUser>): Promise<KVUser> {
   };
 
   await putJson(`user:${id}`, user);
-  await addId('index:users:all', id, true);
+
+  const indexOps: Promise<void>[] = [
+    addId('index:users:all', id, true),
+  ];
   if (user.email) {
-    await WALINE_KV.put(`index:user:email:${user.email}`, String(id));
+    indexOps.push(WALINE_KV.put(`index:user:email:${user.email}`, String(id)));
   }
   if (user.github) {
-    await WALINE_KV.put(`index:user:social:github:${user.github}`, String(id));
+    indexOps.push(WALINE_KV.put(`index:user:social:github:${user.github}`, String(id)));
   }
   if (user.twitter) {
-    await WALINE_KV.put(`index:user:social:twitter:${user.twitter}`, String(id));
+    indexOps.push(WALINE_KV.put(`index:user:social:twitter:${user.twitter}`, String(id)));
   }
   if (user.facebook) {
-    await WALINE_KV.put(`index:user:social:facebook:${user.facebook}`, String(id));
+    indexOps.push(WALINE_KV.put(`index:user:social:facebook:${user.facebook}`, String(id)));
   }
   if (user.google) {
-    await WALINE_KV.put(`index:user:social:google:${user.google}`, String(id));
+    indexOps.push(WALINE_KV.put(`index:user:social:google:${user.google}`, String(id)));
   }
   if (user.weibo) {
-    await WALINE_KV.put(`index:user:social:weibo:${user.weibo}`, String(id));
+    indexOps.push(WALINE_KV.put(`index:user:social:weibo:${user.weibo}`, String(id)));
   }
   if (user.qq) {
-    await WALINE_KV.put(`index:user:social:qq:${user.qq}`, String(id));
+    indexOps.push(WALINE_KV.put(`index:user:social:qq:${user.qq}`, String(id)));
   }
+  await Promise.all(indexOps);
 
   return user;
 }
@@ -625,7 +894,7 @@ export async function getTopCommenters(limit: number): Promise<{ user: KVUser; c
   for (const id of ids) {
     const user = await getUserById(id);
     if (!user) continue;
-    const commentIds = await getIds(`index:comments:user:${id}`);
+    const commentIds = await getIds(`index:comments:user:${id}:recent`);
     let count = 0;
     if (commentIds.length > 0) {
       const comments = await getCommentsByIds(commentIds);
