@@ -273,7 +273,6 @@ export async function getCommentsByIds(ids: number[]): Promise<KVComment[]> {
 }
 
 export async function getRootCommentsByUrl(
-  ,
   url: string,
   options: { orderBy: string; limit: number; offset: number },
 ): Promise<{ comments: KVComment[]; total: number }> {
@@ -334,7 +333,6 @@ export async function getCommentCountsByUrls(urls: string[], status = 'approved'
 }
 
 export async function searchComments(
-  ,
   options: {
     status?: string;
     keyword?: string;
