@@ -93,11 +93,12 @@ async function putJson<T>(key: string, value: T): Promise<void> {
 
 async function getIds(key: string): Promise<number[]> {
   const arr = await getJson<number[]>(key);
-  return arr || [];
+  return Array.isArray(arr) ? arr : [];
 }
 
 async function addId(key: string, id: number, prepend = false): Promise<void> {
   const ids = await getIds(key);
+  if (!Array.isArray(ids)) return;
   if (ids.includes(id)) return;
   if (prepend) {
     ids.unshift(id);
@@ -109,6 +110,7 @@ async function addId(key: string, id: number, prepend = false): Promise<void> {
 
 async function removeId(key: string, id: number): Promise<void> {
   const ids = await getIds(key);
+  if (!Array.isArray(ids)) return;
   const filtered = ids.filter((x) => x !== id);
   if (filtered.length !== ids.length) {
     await putJson(key, filtered);
@@ -143,7 +145,8 @@ const USER_RECENT_LIMIT = 100;
 // --- 根评论分页 ---
 
 async function getRootPageIds(url: string, page: number): Promise<number[]> {
-  return getJson<number[]>(`comments:url:${url}:root:ids:page:${page}`) || [];
+  const arr = await getJson<number[]>(`comments:url:${url}:root:ids:page:${page}`);
+  return Array.isArray(arr) ? arr : [];
 }
 
 async function setRootPageIds(url: string, page: number, ids: number[]): Promise<void> {
@@ -217,7 +220,8 @@ async function removeRootCommentId(url: string, id: number): Promise<void> {
 // --- 子评论聚合 ---
 
 async function getChildComments(rid: number): Promise<KVComment[]> {
-  return getJson<KVComment[]>(`comments:rid:${rid}`) || [];
+  const arr = await getJson<KVComment[]>(`comments:rid:${rid}`);
+  return Array.isArray(arr) ? arr : [];
 }
 
 async function setChildComments(rid: number, comments: KVComment[]): Promise<void> {
@@ -254,14 +258,16 @@ async function incCommentCount(url: string, delta: number): Promise<void> {
 // --- 最近评论索引 ---
 
 async function addRecentCommentId(id: number): Promise<void> {
-  const recent = (await getJson<number[]>('index:comments:recent')) || [];
+  const raw = await getJson<number[]>('index:comments:recent');
+  const recent = Array.isArray(raw) ? raw : [];
   recent.unshift(id);
   if (recent.length > RECENT_LIMIT) recent.length = RECENT_LIMIT;
   await putJson('index:comments:recent', recent);
 }
 
 async function removeRecentCommentId(id: number): Promise<void> {
-  const recent = (await getJson<number[]>('index:comments:recent')) || [];
+  const raw = await getJson<number[]>('index:comments:recent');
+  const recent = Array.isArray(raw) ? raw : [];
   const filtered = recent.filter((cid) => cid !== id);
   if (filtered.length !== recent.length) {
     await putJson('index:comments:recent', filtered);
@@ -271,7 +277,8 @@ async function removeRecentCommentId(id: number): Promise<void> {
 // --- 状态索引分页 ---
 
 async function getStatusPageIds(status: string, page: number): Promise<number[]> {
-  return getJson<number[]>(`index:comments:status:${status}:ids:page:${page}`) || [];
+  const arr = await getJson<number[]>(`index:comments:status:${status}:ids:page:${page}`);
+  return Array.isArray(arr) ? arr : [];
 }
 
 async function setStatusPageIds(status: string, page: number, ids: number[]): Promise<void> {
@@ -334,7 +341,8 @@ async function removeStatusCommentId(status: string, id: number): Promise<void> 
 
 async function addUserCommentId(userId: number, id: number): Promise<void> {
   const key = `index:comments:user:${userId}:recent`;
-  const recent = (await getJson<number[]>(key)) || [];
+  const raw = await getJson<number[]>(key);
+  const recent = Array.isArray(raw) ? raw : [];
   recent.unshift(id);
   if (recent.length > USER_RECENT_LIMIT) recent.length = USER_RECENT_LIMIT;
   await putJson(key, recent);
@@ -342,7 +350,8 @@ async function addUserCommentId(userId: number, id: number): Promise<void> {
 
 async function removeUserCommentId(userId: number, id: number): Promise<void> {
   const key = `index:comments:user:${userId}:recent`;
-  const recent = (await getJson<number[]>(key)) || [];
+  const raw = await getJson<number[]>(key);
+  const recent = Array.isArray(raw) ? raw : [];
   const filtered = recent.filter((cid) => cid !== id);
   if (filtered.length !== recent.length) {
     await putJson(key, filtered);
@@ -559,7 +568,8 @@ export async function getChildCommentsByRids(rids: number[], status?: string): P
 }
 
 export async function getRecentComments(limit: number): Promise<KVComment[]> {
-  const ids = (await getJson<number[]>('index:comments:recent')) || [];
+  const raw = await getJson<number[]>('index:comments:recent');
+  const ids = Array.isArray(raw) ? raw : [];
   const comments = await getCommentsByIds(ids.slice(0, Math.min(ids.length, limit * 2)));
   const approved = comments.filter((c) => c.status === 'approved');
   approved.sort((a, b) => b.insertedAt.localeCompare(a.insertedAt));
