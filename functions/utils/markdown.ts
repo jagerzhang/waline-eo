@@ -1,6 +1,7 @@
 /**
  * Minimal Markdown → HTML renderer for Workers
  * Handles common constructs + XSS sanitization
+ * Preserves safe <img> tags (emojis from trusted CDNs)
  */
 
 export function renderMarkdown(text: string): string {
@@ -8,7 +9,20 @@ export function renderMarkdown(text: string): string {
 
   let html = text;
 
-  // Escape HTML entities first (XSS prevention)
+  // Preserve safe <img> tags before HTML escaping (emoji support)
+  // @waline/client sends emojis as: <img class="wl-emoji" src="//unpkg.com/..." alt="name">
+  const imgPlaceholders: string[] = [];
+  html = html.replace(/<img\s+[^>]*src=["']([^"']+)["'][^>]*\/?>/gi, (match, src) => {
+    // Allow protocol-relative URLs and https from any source (user-uploaded images, CDNs)
+    if (/^(\/\/|https?:\/\/)/.test(src)) {
+      const idx = imgPlaceholders.length;
+      imgPlaceholders.push(match);
+      return `__IMG_PLACEHOLDER_${idx}__`;
+    }
+    return match;
+  });
+
+  // Escape HTML entities (XSS prevention)
   html = escapeHtml(html);
 
   // Code blocks (``` ... ```)
@@ -84,6 +98,11 @@ export function renderMarkdown(text: string): string {
 
   // Line breaks in paragraphs
   html = html.replace(/(?<!\n)\n(?!\n)/g, '<br />\n');
+
+  // Restore preserved img tags
+  for (let i = 0; i < imgPlaceholders.length; i++) {
+    html = html.replace(`__IMG_PLACEHOLDER_${i}__`, imgPlaceholders[i]);
+  }
 
   return html.trim();
 }
