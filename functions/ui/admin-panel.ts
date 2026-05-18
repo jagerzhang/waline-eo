@@ -311,14 +311,14 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     if (!email || !pwd) { errEl.textContent = '请填写邮箱和密码'; return; }
     btn.disabled = true; btn.textContent = '登录中...';
     errEl.textContent = '';
-    api('/user/login', { method: 'POST', body: JSON.stringify({ email: email, password: pwd }) }).then(function(d) {
-      if (d.errno === 0 && d.token) {
-        if (d.data && d.data.type !== 'administrator') {
+    api('/token', { method: 'POST', body: JSON.stringify({ email: email, password: pwd }) }).then(function(d) {
+      if (d.errno === 0 && d.data && d.data.token) {
+        if (d.data.type !== 'administrator') {
           errEl.textContent = '您没有管理员权限';
           btn.disabled = false; btn.textContent = '登录';
           return;
         }
-        token = d.token;
+        token = d.data.token;
         localStorage.setItem('TOKEN', token);
         currentUser = d.data;
         showAdmin();
@@ -375,7 +375,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       var users = data.data || [];
       var totalPages = data.totalPages || 1;
 
-      var html = '<div class="content-header"><h2>用户管理</h2><p>共 ' + (data.total || users.length) + ' 名用户</p></div>';
+      var html = '<div class="content-header"><h2>用户管理</h2><p>第 ' + usersPage + ' / ' + totalPages + ' 页，本页 ' + users.length + ' 名用户</p></div>';
       html += '<div class="pe-card">';
       html += '<div style="overflow-x:auto;"><table class="pe-table"><thead><tr>';
       html += '<th>用户</th><th>邮箱</th><th>角色</th><th>注册时间</th><th class="actions">操作</th>';
