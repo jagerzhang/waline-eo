@@ -221,17 +221,21 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
   </main>
 </div>
 
+<!-- 兼容旧版 @waline/admin：/ui/profile?token=... 跳转拦截，必须在所有其他脚本之前执行 -->
+<script>
+(function(){
+  var t = ${JSON.stringify(urlToken)};
+  if (t) {
+    try { localStorage.setItem('TOKEN', t); } catch(e) {}
+    location.replace('/ui');
+  }
+})();
+</script>
+
 <script src="https://cdn.jsdelivr.net/npm/layui@2.13.5/dist/layui.js"></script>
 <script>
 (function(){
-  // 兼容旧版 @waline/admin 的 /ui/profile?token=... 跳转
-  var _urlToken = ${JSON.stringify(urlToken)};
-  if (_urlToken) {
-    localStorage.setItem('TOKEN', _urlToken);
-    location.replace('/ui');
-    return;
-  }
-
+  // token 已在上方早期脚本处理，此处无需重复检查
   var API = ${JSON.stringify(apiBase)};
   var token = localStorage.getItem('TOKEN') || sessionStorage.getItem('TOKEN');
   var currentUser = null;
