@@ -368,7 +368,7 @@ export async function createComment(data: Partial<KVComment>): Promise<KVComment
     user_id: data.user_id ?? null,
     comment: data.comment || '',
     orig: data.orig || data.comment || '',
-    insertedAt: now,
+    insertedAt: data.insertedAt || now,
     ip: data.ip || '',
     link: data.link || '',
     mail: data.mail || '',
@@ -380,8 +380,8 @@ export async function createComment(data: Partial<KVComment>): Promise<KVComment
     like: data.like ?? 0,
     ua: data.ua || '',
     url: data.url || '',
-    createdAt: now,
-    updatedAt: now,
+    createdAt: data.createdAt || now,
+    updatedAt: data.updatedAt || now,
   };
 
   await putJson(`comment:${id}`, comment);
@@ -709,6 +709,7 @@ export async function getCountersByUrls(urls: string[]): Promise<KVCounter[]> {
 
 export async function createCounter(url: string, field: string): Promise<KVCounter> {
   const id = await getNextId('meta:next_counter_id');
+  const now = nowIso();
   const counter: KVCounter = {
     id,
     time: 0,
@@ -722,12 +723,37 @@ export async function createCounter(url: string, field: string): Promise<KVCount
     reaction7: 0,
     reaction8: 0,
     url,
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
+    createdAt: now,
+    updatedAt: now,
   };
   (counter as any)[field] = 1;
   await putJson(`counter:${url}`, counter);
   await WALINE_KV.put(`index:counter:id:${id}`, url);
+  return counter;
+}
+
+/** 导入专用：直接写入完整 Counter 数据，保留历史时间 */
+export async function importCounter(data: Partial<KVCounter> & { url: string }): Promise<KVCounter> {
+  const id = await getNextId('meta:next_counter_id');
+  const now = nowIso();
+  const counter: KVCounter = {
+    id,
+    time: typeof data.time === 'number' ? data.time : 0,
+    reaction0: typeof data.reaction0 === 'number' ? data.reaction0 : 0,
+    reaction1: typeof data.reaction1 === 'number' ? data.reaction1 : 0,
+    reaction2: typeof data.reaction2 === 'number' ? data.reaction2 : 0,
+    reaction3: typeof data.reaction3 === 'number' ? data.reaction3 : 0,
+    reaction4: typeof data.reaction4 === 'number' ? data.reaction4 : 0,
+    reaction5: typeof data.reaction5 === 'number' ? data.reaction5 : 0,
+    reaction6: typeof data.reaction6 === 'number' ? data.reaction6 : 0,
+    reaction7: typeof data.reaction7 === 'number' ? data.reaction7 : 0,
+    reaction8: typeof data.reaction8 === 'number' ? data.reaction8 : 0,
+    url: data.url,
+    createdAt: data.createdAt || now,
+    updatedAt: data.updatedAt || now,
+  };
+  await putJson(`counter:${data.url}`, counter);
+  await WALINE_KV.put(`index:counter:id:${id}`, data.url);
   return counter;
 }
 
@@ -798,8 +824,8 @@ export async function createUser(data: Partial<KVUser>): Promise<KVUser> {
     weibo: data.weibo || '',
     qq: data.qq || '',
     '2fa': data['2fa'] || '',
-    createdAt: now,
-    updatedAt: now,
+    createdAt: data.createdAt || now,
+    updatedAt: data.updatedAt || now,
   };
 
   await putJson(`user:${id}`, user);

@@ -16,14 +16,11 @@ import {
   clearUsers,
   createComment,
   createUser,
-  createCounter,
+  importCounter,
   updateComment,
   updateUser,
   updateCounter,
-  getCommentById,
-  getUserById,
   getCounterById,
-  getCounterByUrl,
 } from '../db/kv-store.js';
 
 export const dbRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -180,21 +177,25 @@ dbRoutes.post('/', async (c) => {
   if (table === 'Comment') {
     created = await createComment(data);
   } else if (table === 'Counter') {
-    // Create counter with all provided fields
+    // 导入：直接写入完整数据，保留历史时间
     const url = data.url || '';
-    const initField = Object.keys(data).find((k) => k !== 'url' && k !== 'id' && VALID_COUNTER_FIELDS.has(k)) || 'time';
-    const initValue = typeof data[initField] === 'number' ? data[initField] : (parseInt(String(data[initField])) || 1);
-    // Override createCounter's default value with imported value
-    created = await createCounter(url, initField);
-    if (initValue !== 1) {
-      await updateCounter(url, initField, initValue);
-    }
-    // Apply remaining fields
-    for (const [k, v] of Object.entries(data)) {
-      if (k !== 'url' && k !== 'id' && VALID_COUNTER_FIELDS.has(k) && k !== initField) {
-        await updateCounter(url, k, typeof v === 'number' ? v : parseInt(String(v)) || 0);
-      }
-    }
+    if (!url) return c.json({ errno: 1, errmsg: 'Counter missing url' }, 400);
+    const toNum = (v: any) => (typeof v === 'number' ? v : parseInt(String(v)) || 0);
+    created = await importCounter({
+      url,
+      time:      toNum(data.time),
+      reaction0: toNum(data.reaction0),
+      reaction1: toNum(data.reaction1),
+      reaction2: toNum(data.reaction2),
+      reaction3: toNum(data.reaction3),
+      reaction4: toNum(data.reaction4),
+      reaction5: toNum(data.reaction5),
+      reaction6: toNum(data.reaction6),
+      reaction7: toNum(data.reaction7),
+      reaction8: toNum(data.reaction8),
+      createdAt: data.createdAt || undefined,
+      updatedAt: data.updatedAt || undefined,
+    });
   } else if (table === 'Users') {
     created = await createUser(data);
   }
