@@ -161,7 +161,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 <div id="loginPage" class="login-wrap" style="display:none;">
   <div class="login-card">
     <div class="login-logo">
-      <div style="font-size:40px;">💬</div>
+      <div style="font-size:40px;">&#x1F4AC;</div>
       <h1>Waline 管理后台</h1>
       <p>Waline On EdgeOne</p>
     </div>
@@ -171,7 +171,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     </div>
     <div class="login-field">
       <label>密码</label>
-      <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
+      <input type="password" id="loginPassword" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="current-password">
     </div>
     <button class="login-btn" id="loginBtn">登录</button>
     <div class="login-err" id="loginErr"></div>
@@ -183,15 +183,15 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
   <!-- Sidebar -->
   <aside class="admin-sidebar" id="adminSidebar">
     <div class="sidebar-logo">
-      <h2>💬 Waline 管理</h2>
+      <h2>&#x1F4AC; Waline 管理</h2>
       <p>Waline On EdgeOne</p>
     </div>
     <nav class="sidebar-nav">
       <div class="nav-group-label">内容管理</div>
-      <a class="nav-item active" data-page="users" onclick="navTo('users')">
+      <a class="nav-item active" data-page="users" id="navUsers">
         <i class="layui-icon layui-icon-username"></i> 用户管理
       </a>
-      <a class="nav-item" data-page="comments" onclick="navTo('comments')">
+      <a class="nav-item" data-page="comments" id="navComments">
         <i class="layui-icon layui-icon-chat"></i> 评论管理
       </a>
       <div class="nav-group-label" style="margin-top:8px;">系统</div>
@@ -207,7 +207,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
           <div class="role" id="sidebarRole">administrator</div>
         </div>
       </div>
-      <button class="logout-btn" onclick="doLogout()">
+      <button class="logout-btn" id="logoutBtn">
         <i class="layui-icon layui-icon-logout"></i> 退出登录
       </button>
     </div>
@@ -259,6 +259,23 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
   function esc(s) {
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
+
+  // ===== 通用模态框关闭：点击 .pe-modal-cancel 按钮或点击遮罩背景 =====
+  document.addEventListener('click', function(e) {
+    var t = e.target;
+    if (t && t.classList && t.classList.contains('pe-modal-cancel')) {
+      var mask = t.closest('.pe-modal-mask');
+      if (mask) mask.remove();
+      return;
+    }
+    if (t && t.classList && t.classList.contains('pe-modal-mask')) {
+      t.remove();
+    }
+  });
+
+  // ===== 导航 =====
+  document.getElementById('navUsers').addEventListener('click', function(){ navTo('users'); });
+  document.getElementById('navComments').addEventListener('click', function(){ navTo('comments'); });
 
   // ===== Init =====
   function init() {
@@ -327,21 +344,21 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     navTo('users');
   }
 
-  window.navTo = function(page) {
-    document.querySelectorAll('.nav-item[data-page]').forEach(function(el){ el.classList.remove('active'); });
-    var active = document.querySelector('.nav-item[data-page="' + page + '"]');
-    if (active) active.classList.add('active');
-    if (page === 'users') loadUsersPage();
-    else if (page === 'comments') loadCommentsPage();
-  };
-
-  window.doLogout = function() {
+  document.getElementById('logoutBtn').addEventListener('click', function() {
     localStorage.removeItem('TOKEN');
     sessionStorage.removeItem('TOKEN');
     token = null;
     currentUser = null;
     showLogin();
-  };
+  });
+
+  function navTo(page) {
+    document.querySelectorAll('.nav-item[data-page]').forEach(function(el){ el.classList.remove('active'); });
+    var active = document.querySelector('.nav-item[data-page="' + page + '"]');
+    if (active) active.classList.add('active');
+    if (page === 'users') loadUsersPage();
+    else if (page === 'comments') loadCommentsPage();
+  }
 
   // ===== Users Page =====
   var usersPage = 1;
@@ -360,8 +377,6 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 
       var html = '<div class="content-header"><h2>用户管理</h2><p>共 ' + (data.total || users.length) + ' 名用户</p></div>';
       html += '<div class="pe-card">';
-      html += '<div style="display:flex;justify-content:flex-end;margin-bottom:12px;">';
-      html += '</div>';
       html += '<div style="overflow-x:auto;"><table class="pe-table"><thead><tr>';
       html += '<th>用户</th><th>邮箱</th><th>角色</th><th>注册时间</th><th class="actions">操作</th>';
       html += '</tr></thead><tbody>';
@@ -372,127 +387,146 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
         users.forEach(function(u) {
           var roleClass = u.type === 'administrator' ? 'badge-admin' : (u.label === 'banned' ? 'badge-banned' : 'badge-guest');
           var roleLabel = u.type === 'administrator' ? '管理员' : (u.label === 'banned' ? '已封禁' : '普通用户');
-          var avatar = u.avatar || ('https://cravatar.cn/avatar/?d=mp&s=40');
+          var avatar = u.avatar || 'https://cravatar.cn/avatar/?d=mp&s=40';
           var createdAt = u.createdAt ? u.createdAt.replace('T', ' ').replace('Z', '').substring(0, 16) : '-';
           html += '<tr>';
-          html += '<td><div style="display:flex;align-items:center;gap:8px;"><img src="' + esc(avatar) + '" width="32" height="32" style="border-radius:50%;object-fit:cover;" onerror="this.src=this.dataset.fb" data-fb="https://cravatar.cn/avatar/?d=mp"><span style="font-weight:600;">' + esc(u.display_name || '-') + '</span></div></td>';
+          html += '<td><div style="display:flex;align-items:center;gap:8px;"><img src="' + esc(avatar) + '" width="32" height="32" style="border-radius:50%;object-fit:cover;" data-fb="https://cravatar.cn/avatar/?d=mp"><span style="font-weight:600;">' + esc(u.display_name || '-') + '</span></div></td>';
           html += '<td style="color:var(--pe-text-secondary);">' + esc(u.email || '-') + '</td>';
           html += '<td><span class="badge ' + roleClass + '">' + roleLabel + '</span></td>';
           html += '<td style="color:var(--pe-text-muted);font-size:12px;">' + createdAt + '</td>';
           html += '<td class="actions">';
           if (u.type !== 'administrator') {
-            html += '<button class="pe-btn pe-btn-primary user-action" data-action="role" data-id="' + u.objectId + '" data-name="' + esc(u.display_name) + '" data-type="' + esc(u.type) + '">设角色</button>';
+            html += '<button class="pe-btn pe-btn-primary user-action" data-action="role" data-id="' + esc(u.objectId) + '" data-name="' + esc(u.display_name) + '" data-type="' + esc(u.type) + '">设角色</button>';
           }
-          html += '<button class="pe-btn pe-btn-warning user-action" data-action="resetpwd" data-id="' + u.objectId + '" data-name="' + esc(u.display_name) + '">重置密码</button>';
+          html += '<button class="pe-btn pe-btn-warning user-action" data-action="resetpwd" data-id="' + esc(u.objectId) + '" data-name="' + esc(u.display_name) + '">重置密码</button>';
           if (u.label !== 'banned' && u.type !== 'administrator') {
-            html += '<button class="pe-btn pe-btn-default user-action" data-action="ban" data-id="' + u.objectId + '" data-name="' + esc(u.display_name) + '">封禁</button>';
+            html += '<button class="pe-btn pe-btn-default user-action" data-action="ban" data-id="' + esc(u.objectId) + '" data-name="' + esc(u.display_name) + '">封禁</button>';
           } else if (u.label === 'banned') {
-            html += '<button class="pe-btn pe-btn-success user-action" data-action="unban" data-id="' + u.objectId + '" data-name="' + esc(u.display_name) + '">解封</button>';
+            html += '<button class="pe-btn pe-btn-success user-action" data-action="unban" data-id="' + esc(u.objectId) + '" data-name="' + esc(u.display_name) + '">解封</button>';
           }
-          html += '<button class="pe-btn pe-btn-danger user-action" data-action="delete" data-id="' + u.objectId + '" data-name="' + esc(u.display_name) + '">删除</button>';
+          html += '<button class="pe-btn pe-btn-danger user-action" data-action="delete" data-id="' + esc(u.objectId) + '" data-name="' + esc(u.display_name) + '">删除</button>';
           html += '</td></tr>';
         });
       }
 
       html += '</tbody></table></div>';
-
-      // Pagination
       if (totalPages > 1) {
         html += '<div class="pe-pagination">';
         for (var p = 1; p <= totalPages; p++) {
-          html += '<button class="pe-page-btn' + (p === usersPage ? ' active' : '') + '" onclick="loadUsersPage(' + p + ')">' + p + '</button>';
+          html += '<button class="pe-page-btn' + (p === usersPage ? ' active' : '') + '" data-page="' + p + '">' + p + '</button>';
         }
         html += '</div>';
       }
-
       html += '</div>';
       c.innerHTML = html;
-      // 事件委托：处理用户操作按钮（避免 onclick 内联引号嵌套问题）
+
+      // 用户操作按钮事件委托
       c.addEventListener('click', function(e) {
         var btn = e.target.closest('.user-action');
-        if (!btn) return;
-        var action = btn.dataset.action, id = btn.dataset.id, name = btn.dataset.name;
-        if (action === 'role') showSetRoleModal(id, name, btn.dataset.type);
-        else if (action === 'resetpwd') showResetPwdModal(id, name);
-        else if (action === 'ban') banUser(id, name);
-        else if (action === 'unban') unbanUser(id, name);
-        else if (action === 'delete') deleteUser(id, name);
+        if (btn) {
+          var action = btn.dataset.action, id = btn.dataset.id, name = btn.dataset.name;
+          if (action === 'role') showSetRoleModal(id, name, btn.dataset.type);
+          else if (action === 'resetpwd') showResetPwdModal(id, name);
+          else if (action === 'ban') banUser(id, name);
+          else if (action === 'unban') unbanUser(id, name);
+          else if (action === 'delete') deleteUser(id, name);
+          return;
+        }
+        // 分页按钮
+        var pageBtn = e.target.closest('.pe-page-btn[data-page]');
+        if (pageBtn && c.querySelector('.user-action')) {
+          loadUsersPage(parseInt(pageBtn.dataset.page));
+        }
+      });
+
+      // avatar onerror
+      c.querySelectorAll('img[data-fb]').forEach(function(img) {
+        img.addEventListener('error', function(){ this.src = this.dataset.fb; });
       });
     }).catch(function() {
       c.innerHTML = '<div class="loading-box" style="color:var(--pe-danger);">加载失败，请刷新重试</div>';
     });
   }
 
-  window.showSetRoleModal = function(id, name, currentType) {
+  // ===== Modals =====
+  function showModal(html) {
     var mask = document.createElement('div');
     mask.className = 'pe-modal-mask';
-    mask.innerHTML = '<div class="pe-modal"><h3>修改角色：' + esc(name) + '</h3>' +
-      '<div class="field"><label>角色</label><select id="roleSelect">' +
-      '<option value="administrator"' + (currentType==='administrator'?' selected':'') + '>管理员</option>' +
-      '<option value="guest"' + (currentType!=='administrator'?' selected':'') + '>普通用户</option>' +
-      '</select></div>' +
-      '<div class="pe-modal-footer">' +
-      '<button class="pe-btn pe-btn-default" onclick="this.closest(\'.pe-modal-mask\').remove()">取消</button>' +
-      '<button class="pe-btn pe-btn-primary" onclick="doSetRole(' + id + ')">确认</button>' +
-      '</div></div>';
+    mask.innerHTML = html;
     document.body.appendChild(mask);
-  };
+    return mask;
+  }
 
-  window.doSetRole = function(id) {
-    var type = document.getElementById('roleSelect').value;
-    api('/user/' + id, { method: 'PUT', body: JSON.stringify({ type: type }) }).then(function(d) {
-      if (d.errno === 0) { toast('角色已更新'); document.querySelector('.pe-modal-mask')?.remove(); loadUsersPage(usersPage); }
-      else toast(d.errmsg || '操作失败', false);
-    }).catch(function(){ toast('请求失败', false); });
-  };
+  function showSetRoleModal(id, name, currentType) {
+    var mask = showModal(
+      '<div class="pe-modal">' +
+        '<h3>修改角色：' + esc(name) + '</h3>' +
+        '<div class="field"><label>角色</label><select id="roleSelect">' +
+          '<option value="administrator"' + (currentType === 'administrator' ? ' selected' : '') + '>管理员</option>' +
+          '<option value="guest"' + (currentType !== 'administrator' ? ' selected' : '') + '>普通用户</option>' +
+        '</select></div>' +
+        '<div class="pe-modal-footer">' +
+          '<button class="pe-btn pe-btn-default pe-modal-cancel">取消</button>' +
+          '<button class="pe-btn pe-btn-primary" id="doSetRoleBtn">确认</button>' +
+        '</div>' +
+      '</div>'
+    );
+    mask.querySelector('#doSetRoleBtn').addEventListener('click', function() {
+      var type = mask.querySelector('#roleSelect').value;
+      api('/user/' + id, { method: 'PUT', body: JSON.stringify({ type: type }) }).then(function(d) {
+        if (d.errno === 0) { toast('角色已更新'); mask.remove(); loadUsersPage(usersPage); }
+        else toast(d.errmsg || '操作失败', false);
+      }).catch(function(){ toast('请求失败', false); });
+    });
+  }
 
-  window.showResetPwdModal = function(id, name) {
-    var mask = document.createElement('div');
-    mask.className = 'pe-modal-mask';
-    mask.innerHTML = '<div class="pe-modal"><h3>重置密码：' + esc(name) + '</h3>' +
-      '<div class="field"><label>新密码</label><input type="password" id="newPwdInput" placeholder="输入新密码（至少6位）"></div>' +
-      '<div class="field"><label>确认密码</label><input type="password" id="newPwdConfirm" placeholder="再次输入新密码"></div>' +
-      '<div class="pe-modal-footer">' +
-      '<button class="pe-btn pe-btn-default" onclick="this.closest(\'.pe-modal-mask\').remove()">取消</button>' +
-      '<button class="pe-btn pe-btn-primary" onclick="doResetPwd(' + id + ')">确认重置</button>' +
-      '</div></div>';
-    document.body.appendChild(mask);
-  };
+  function showResetPwdModal(id, name) {
+    var mask = showModal(
+      '<div class="pe-modal">' +
+        '<h3>重置密码：' + esc(name) + '</h3>' +
+        '<div class="field"><label>新密码</label><input type="password" id="newPwdInput" placeholder="输入新密码（至少6位）"></div>' +
+        '<div class="field"><label>确认密码</label><input type="password" id="newPwdConfirm" placeholder="再次输入新密码"></div>' +
+        '<div class="pe-modal-footer">' +
+          '<button class="pe-btn pe-btn-default pe-modal-cancel">取消</button>' +
+          '<button class="pe-btn pe-btn-primary" id="doResetPwdBtn">确认重置</button>' +
+        '</div>' +
+      '</div>'
+    );
+    mask.querySelector('#doResetPwdBtn').addEventListener('click', function() {
+      var pwd = mask.querySelector('#newPwdInput').value;
+      var confirm = mask.querySelector('#newPwdConfirm').value;
+      if (!pwd || pwd.length < 6) { toast('密码至少 6 位', false); return; }
+      if (pwd !== confirm) { toast('两次密码不一致', false); return; }
+      api('/user/' + id, { method: 'PUT', body: JSON.stringify({ password: pwd }) }).then(function(d) {
+        if (d.errno === 0) { toast('密码已重置'); mask.remove(); }
+        else toast(d.errmsg || '操作失败', false);
+      }).catch(function(){ toast('请求失败', false); });
+    });
+  }
 
-  window.doResetPwd = function(id) {
-    var pwd = document.getElementById('newPwdInput').value;
-    var confirm = document.getElementById('newPwdConfirm').value;
-    if (!pwd || pwd.length < 6) { toast('密码至少 6 位', false); return; }
-    if (pwd !== confirm) { toast('两次密码不一致', false); return; }
-    api('/user/' + id, { method: 'PUT', body: JSON.stringify({ password: pwd }) }).then(function(d) {
-      if (d.errno === 0) { toast('密码已重置'); document.querySelector('.pe-modal-mask')?.remove(); }
-      else toast(d.errmsg || '操作失败', false);
-    }).catch(function(){ toast('请求失败', false); });
-  };
-
-  window.banUser = function(id, name) {
+  function banUser(id, name) {
     if (!confirm('确定封禁用户「' + name + '」？')) return;
     api('/user/' + id, { method: 'PUT', body: JSON.stringify({ label: 'banned' }) }).then(function(d) {
       if (d.errno === 0) { toast('已封禁用户'); loadUsersPage(usersPage); }
       else toast(d.errmsg || '操作失败', false);
     }).catch(function(){ toast('请求失败', false); });
-  };
+  }
 
-  window.unbanUser = function(id, name) {
+  function unbanUser(id, name) {
     if (!confirm('解除用户「' + name + '」的封禁？')) return;
     api('/user/' + id, { method: 'PUT', body: JSON.stringify({ label: '' }) }).then(function(d) {
       if (d.errno === 0) { toast('已解封'); loadUsersPage(usersPage); }
       else toast(d.errmsg || '操作失败', false);
     }).catch(function(){ toast('请求失败', false); });
-  };
+  }
 
-  window.deleteUser = function(id, name) {
+  function deleteUser(id, name) {
     if (!confirm('确定删除用户「' + name + '」？此操作不可撤销！')) return;
     api('/user/' + id, { method: 'DELETE' }).then(function(d) {
       if (d.errno === 0) { toast('用户已删除'); loadUsersPage(usersPage); }
       else toast(d.errmsg || '操作失败', false);
     }).catch(function(){ toast('请求失败', false); });
-  };
+  }
 
   // ===== Comments Page =====
   var cmtPage = 1;
@@ -518,11 +552,10 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       var html = '<div class="content-header"><h2>评论管理</h2><p>共 ' + (data.count || comments.length) + ' 条评论</p></div>';
       html += '<div class="pe-card">';
       html += '<div class="search-bar">';
-      html += '<select id="cmtStatusFilter" onchange="cmtStatus=this.value;loadCommentsPage(1)"><option value="">全部状态</option><option value="approved"' + (cmtStatus==='approved'?' selected':'') + '>已通过</option><option value="waiting"' + (cmtStatus==='waiting'?' selected':'') + '>待审核</option><option value="spam"' + (cmtStatus==='spam'?' selected':'') + '>垃圾</option></select>';
+      html += '<select id="cmtStatusFilter"><option value="">全部状态</option><option value="approved"' + (cmtStatus === 'approved' ? ' selected' : '') + '>已通过</option><option value="waiting"' + (cmtStatus === 'waiting' ? ' selected' : '') + '>待审核</option><option value="spam"' + (cmtStatus === 'spam' ? ' selected' : '') + '>垃圾</option></select>';
       html += '<input id="cmtKeywordInput" value="' + esc(cmtKeyword) + '" placeholder="搜索评论内容..." style="flex:1;min-width:140px;">';
       html += '<button class="pe-btn pe-btn-primary" id="cmtSearchBtn">搜索</button>';
       html += '</div>';
-
       html += '<div style="overflow-x:auto;"><table class="pe-table"><thead><tr>';
       html += '<th>评论内容</th><th>评论者</th><th>页面</th><th>状态</th><th>时间</th><th class="actions">操作</th>';
       html += '</tr></thead><tbody>';
@@ -542,39 +575,47 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
           html += '<td><span class="badge ' + statusClass + '">' + statusLabel + '</span></td>';
           html += '<td style="font-size:12px;color:var(--pe-text-muted);white-space:nowrap;">' + timeStr + '</td>';
           html += '<td class="actions">';
-          if (cm.status !== 'approved') html += '<button class="pe-btn pe-btn-success cmt-action" data-action="status" data-id="' + cm.objectId + '" data-status="approved">通过</button>';
-          if (cm.status !== 'waiting') html += '<button class="pe-btn pe-btn-warning cmt-action" data-action="status" data-id="' + cm.objectId + '" data-status="waiting">待审</button>';
-          if (cm.status !== 'spam') html += '<button class="pe-btn pe-btn-default cmt-action" data-action="status" data-id="' + cm.objectId + '" data-status="spam">垃圾</button>';
-          html += '<button class="pe-btn pe-btn-danger cmt-action" data-action="delete" data-id="' + cm.objectId + '">删除</button>';
+          if (cm.status !== 'approved') html += '<button class="pe-btn pe-btn-success cmt-action" data-action="status" data-id="' + esc(cm.objectId) + '" data-status="approved">通过</button>';
+          if (cm.status !== 'waiting') html += '<button class="pe-btn pe-btn-warning cmt-action" data-action="status" data-id="' + esc(cm.objectId) + '" data-status="waiting">待审</button>';
+          if (cm.status !== 'spam') html += '<button class="pe-btn pe-btn-default cmt-action" data-action="status" data-id="' + esc(cm.objectId) + '" data-status="spam">垃圾</button>';
+          html += '<button class="pe-btn pe-btn-danger cmt-action" data-action="delete" data-id="' + esc(cm.objectId) + '">删除</button>';
           html += '</td></tr>';
         });
       }
 
       html += '</tbody></table></div>';
-
-      // Pagination
       if (totalPages > 1) {
         html += '<div class="pe-pagination">';
         for (var p = 1; p <= Math.min(totalPages, 20); p++) {
-          html += '<button class="pe-page-btn' + (p === cmtPage ? ' active' : '') + '" onclick="loadCommentsPage(' + p + ')">' + p + '</button>';
+          html += '<button class="pe-page-btn' + (p === cmtPage ? ' active' : '') + '" data-page="' + p + '">' + p + '</button>';
         }
         if (totalPages > 20) html += '<span style="padding:5px 8px;color:var(--pe-text-muted);">...</span>';
         html += '</div>';
       }
-
       html += '</div>';
       c.innerHTML = html;
-      // 事件委托：处理评论操作按钮（避免 onclick 内联引号嵌套问题）
+
+      // 评论操作事件委托
       c.addEventListener('click', function(e) {
         var btn = e.target.closest('.cmt-action');
-        if (!btn) return;
-        var action = btn.dataset.action, id = btn.dataset.id;
-        if (action === 'status') setCmtStatus(id, btn.dataset.status);
-        else if (action === 'delete') deleteCmt(id);
+        if (btn) {
+          var action = btn.dataset.action, id = btn.dataset.id;
+          if (action === 'status') setCmtStatus(id, btn.dataset.status);
+          else if (action === 'delete') deleteCmt(id);
+          return;
+        }
+        // 分页
+        var pageBtn = e.target.closest('.pe-page-btn[data-page]');
+        if (pageBtn && c.querySelector('.cmt-action')) {
+          loadCommentsPage(parseInt(pageBtn.dataset.page));
+        }
       });
-      // 搜索框事件绑定
-      var searchBtn = document.getElementById('cmtSearchBtn');
-      var searchInput = document.getElementById('cmtKeywordInput');
+
+      // 搜索框
+      var statusFilter = c.querySelector('#cmtStatusFilter');
+      var searchInput = c.querySelector('#cmtKeywordInput');
+      var searchBtn = c.querySelector('#cmtSearchBtn');
+      if (statusFilter) statusFilter.addEventListener('change', function(){ cmtStatus = this.value; loadCommentsPage(1); });
       if (searchBtn && searchInput) {
         var doSearch = function() { cmtKeyword = searchInput.value; loadCommentsPage(1); };
         searchBtn.addEventListener('click', doSearch);
@@ -585,23 +626,20 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     });
   }
 
-  window.setCmtStatus = function(id, status) {
+  function setCmtStatus(id, status) {
     api('/comment/' + id, { method: 'PUT', body: JSON.stringify({ status: status }) }).then(function(d) {
       if (d.errno === 0) { toast('状态已更新'); loadCommentsPage(cmtPage); }
       else toast(d.errmsg || '操作失败', false);
     }).catch(function(){ toast('请求失败', false); });
-  };
+  }
 
-  window.deleteCmt = function(id) {
+  function deleteCmt(id) {
     if (!confirm('确定删除该评论？')) return;
     api('/comment/' + id, { method: 'DELETE' }).then(function(d) {
       if (d.errno === 0) { toast('评论已删除'); loadCommentsPage(cmtPage); }
       else toast(d.errmsg || '操作失败', false);
     }).catch(function(){ toast('请求失败', false); });
-  };
-
-  window.loadUsersPage = loadUsersPage;
-  window.loadCommentsPage = loadCommentsPage;
+  }
 
   // ===== Start =====
   init();
