@@ -375,7 +375,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
           var avatar = u.avatar || ('https://cravatar.cn/avatar/?d=mp&s=40');
           var createdAt = u.createdAt ? u.createdAt.replace('T', ' ').replace('Z', '').substring(0, 16) : '-';
           html += '<tr>';
-          html += '<td><div style="display:flex;align-items:center;gap:8px;"><img src="' + esc(avatar) + '" width="32" height="32" style="border-radius:50%;object-fit:cover;" onerror="this.src=\'https://cravatar.cn/avatar/?d=mp\'"><span style="font-weight:600;">' + esc(u.display_name || '-') + '</span></div></td>';
+          html += '<td><div style="display:flex;align-items:center;gap:8px;"><img src="' + esc(avatar) + '" width="32" height="32" style="border-radius:50%;object-fit:cover;" onerror="this.src=this.dataset.fb" data-fb="https://cravatar.cn/avatar/?d=mp"><span style="font-weight:600;">' + esc(u.display_name || '-') + '</span></div></td>';
           html += '<td style="color:var(--pe-text-secondary);">' + esc(u.email || '-') + '</td>';
           html += '<td><span class="badge ' + roleClass + '">' + roleLabel + '</span></td>';
           html += '<td style="color:var(--pe-text-muted);font-size:12px;">' + createdAt + '</td>';
