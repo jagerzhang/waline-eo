@@ -85,36 +85,38 @@ commentRoutes.post('/', async (c) => {
     return c.json({ errno: 1, errmsg: 'ua is too long (max 1024 chars)' }, 400);
   }
 
-  // Geetest 4.0 validation (only if configured)
-  const [gtCaptchaId, gtCaptchaKey] = await Promise.all([
-    getSetting('geetest_captcha_id').catch(() => null),
-    getSetting('geetest_captcha_key').catch(() => null),
-  ]);
-  if (gtCaptchaId && gtCaptchaKey) {
-    const { geetest_lot_number, geetest_pass_token, geetest_gen_time } = body;
-    if (!geetest_lot_number || !geetest_pass_token || !geetest_gen_time) {
-      return c.json({ errno: 1, errmsg: '请完成人机验证后再提交评论' }, 400);
-    }
-    const passed = await validateGeetest({
-      captchaId: gtCaptchaId,
-      captchaKey: gtCaptchaKey,
-      lotNumber: geetest_lot_number,
-      passToken: geetest_pass_token,
-      genTime: geetest_gen_time,
-    });
-    if (!passed) {
-      return c.json({ errno: 1, errmsg: '人机验证失败，请刷新页面重试' }, 400);
+  // Geetest 4.0 validation (only if configured, skip for administrators)
+  const ip = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || '';
+  const userInfo = c.get('userInfo');
+  const isAdmin = userInfo?.type === 'administrator';
+
+  if (!isAdmin) {
+    const [gtCaptchaId, gtCaptchaKey] = await Promise.all([
+      getSetting('geetest_captcha_id').catch(() => null),
+      getSetting('geetest_captcha_key').catch(() => null),
+    ]);
+    if (gtCaptchaId && gtCaptchaKey) {
+      const { geetest_lot_number, geetest_pass_token, geetest_gen_time } = body;
+      if (!geetest_lot_number || !geetest_pass_token || !geetest_gen_time) {
+        return c.json({ errno: 1, errmsg: '请完成人机验证后再提交评论' }, 400);
+      }
+      const passed = await validateGeetest({
+        captchaId: gtCaptchaId,
+        captchaKey: gtCaptchaKey,
+        lotNumber: geetest_lot_number,
+        passToken: geetest_pass_token,
+        genTime: geetest_gen_time,
+      });
+      if (!passed) {
+        return c.json({ errno: 1, errmsg: '人机验证失败，请刷新页面重试' }, 400);
+      }
     }
   }
 
-  // EdgeOne passes client IP via x-real-ip or x-forwarded-for
-  const ip = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || '';
-  const userInfo = c.get('userInfo');
-
-  // IPQPS rate limit
+  // IPQPS rate limit (skip for administrators)
   const ipqpsRaw = (await getSetting('ipqps').catch(() => null)) || c.env.IPQPS;
   const ipqps = ipqpsRaw ? parseInt(String(ipqpsRaw)) : 60;
-  if (ipqps > 0 && ip) {
+  if (!isAdmin && ipqps > 0 && ip) {
     const lastKey = `ipqps:${ip}`;
     const lastStr = await WALINE_KV.get(lastKey);
     const lastTime = lastStr ? parseInt(lastStr) : 0;
@@ -126,11 +128,14 @@ commentRoutes.post('/', async (c) => {
   }
 
   // Determine initial status:
+  // - administrator: always approved, no review needed
   // - comment_default_status setting: anonymous users
   // - user_comment_default_status setting: logged-in users
   // - Fallback: AUDIT env var, then approved
   let status: string;
-  if (userInfo) {
+  if (userInfo?.type === 'administrator') {
+    status = 'approved';
+  } else if (userInfo) {
     const userDefault = await getSetting('user_comment_default_status').catch(() => null);
     status = (userDefault === 'waiting') ? 'waiting' : 'approved';
   } else {

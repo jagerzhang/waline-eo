@@ -10,6 +10,8 @@ export async function getAdminPage(env: Env, requestUrl: string): Promise<string
   const url = new URL(requestUrl);
   const origin = url.origin;
   const apiBase = origin;
+  // 兼容旧版 @waline/admin 的 /ui/profile?token=... 跳转：将 token 提取后注入，页面端完成存储并重定向
+  const urlToken = url.searchParams.get('token') || '';
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -222,6 +224,14 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 <script src="https://cdn.jsdelivr.net/npm/layui@2.13.5/dist/layui.js"></script>
 <script>
 (function(){
+  // 兼容旧版 @waline/admin 的 /ui/profile?token=... 跳转
+  var _urlToken = ${JSON.stringify(urlToken)};
+  if (_urlToken) {
+    localStorage.setItem('TOKEN', _urlToken);
+    location.replace('/ui');
+    return;
+  }
+
   var API = ${JSON.stringify(apiBase)};
   var token = localStorage.getItem('TOKEN') || sessionStorage.getItem('TOKEN');
   var currentUser = null;
