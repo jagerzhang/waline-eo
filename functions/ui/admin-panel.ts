@@ -381,15 +381,15 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
           html += '<td style="color:var(--pe-text-muted);font-size:12px;">' + createdAt + '</td>';
           html += '<td class="actions">';
           if (u.type !== 'administrator') {
-            html += '<button class="pe-btn pe-btn-primary" onclick="showSetRoleModal(' + u.objectId + ',\'' + esc(u.display_name) + '\',\'' + esc(u.type) + '\')">设角色</button>';
+            html += '<button class="pe-btn pe-btn-primary user-action" data-action="role" data-id="' + u.objectId + '" data-name="' + esc(u.display_name) + '" data-type="' + esc(u.type) + '">设角色</button>';
           }
-          html += '<button class="pe-btn pe-btn-warning" onclick="showResetPwdModal(' + u.objectId + ',\'' + esc(u.display_name) + '\')">重置密码</button>';
+          html += '<button class="pe-btn pe-btn-warning user-action" data-action="resetpwd" data-id="' + u.objectId + '" data-name="' + esc(u.display_name) + '">重置密码</button>';
           if (u.label !== 'banned' && u.type !== 'administrator') {
-            html += '<button class="pe-btn pe-btn-default" onclick="banUser(' + u.objectId + ',\'' + esc(u.display_name) + '\')">封禁</button>';
+            html += '<button class="pe-btn pe-btn-default user-action" data-action="ban" data-id="' + u.objectId + '" data-name="' + esc(u.display_name) + '">封禁</button>';
           } else if (u.label === 'banned') {
-            html += '<button class="pe-btn pe-btn-success" onclick="unbanUser(' + u.objectId + ',\'' + esc(u.display_name) + '\')">解封</button>';
+            html += '<button class="pe-btn pe-btn-success user-action" data-action="unban" data-id="' + u.objectId + '" data-name="' + esc(u.display_name) + '">解封</button>';
           }
-          html += '<button class="pe-btn pe-btn-danger" onclick="deleteUser(' + u.objectId + ',\'' + esc(u.display_name) + '\')">删除</button>';
+          html += '<button class="pe-btn pe-btn-danger user-action" data-action="delete" data-id="' + u.objectId + '" data-name="' + esc(u.display_name) + '">删除</button>';
           html += '</td></tr>';
         });
       }
@@ -407,6 +407,17 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 
       html += '</div>';
       c.innerHTML = html;
+      // 事件委托：处理用户操作按钮（避免 onclick 内联引号嵌套问题）
+      c.addEventListener('click', function(e) {
+        var btn = (e.target as HTMLElement).closest('.user-action') as HTMLElement;
+        if (!btn) return;
+        var action = btn.dataset.action, id = btn.dataset.id, name = btn.dataset.name;
+        if (action === 'role') showSetRoleModal(id, name, btn.dataset.type);
+        else if (action === 'resetpwd') showResetPwdModal(id, name);
+        else if (action === 'ban') banUser(id, name);
+        else if (action === 'unban') unbanUser(id, name);
+        else if (action === 'delete') deleteUser(id, name);
+      });
     }).catch(function() {
       c.innerHTML = '<div class="loading-box" style="color:var(--pe-danger);">加载失败，请刷新重试</div>';
     });
@@ -508,8 +519,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       html += '<div class="pe-card">';
       html += '<div class="search-bar">';
       html += '<select id="cmtStatusFilter" onchange="cmtStatus=this.value;loadCommentsPage(1)"><option value="">全部状态</option><option value="approved"' + (cmtStatus==='approved'?' selected':'') + '>已通过</option><option value="waiting"' + (cmtStatus==='waiting'?' selected':'') + '>待审核</option><option value="spam"' + (cmtStatus==='spam'?' selected':'') + '>垃圾</option></select>';
-      html += '<input id="cmtKeywordInput" value="' + esc(cmtKeyword) + '" placeholder="搜索评论内容..." style="flex:1;min-width:140px;" onkeydown="if(event.key===\'Enter\'){cmtKeyword=this.value;loadCommentsPage(1);}">';
-      html += '<button class="pe-btn pe-btn-primary" onclick="cmtKeyword=document.getElementById(\'cmtKeywordInput\').value;loadCommentsPage(1)">搜索</button>';
+      html += '<input id="cmtKeywordInput" value="' + esc(cmtKeyword) + '" placeholder="搜索评论内容..." style="flex:1;min-width:140px;">';
+      html += '<button class="pe-btn pe-btn-primary" id="cmtSearchBtn">搜索</button>';
       html += '</div>';
 
       html += '<div style="overflow-x:auto;"><table class="pe-table"><thead><tr>';
@@ -531,10 +542,10 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
           html += '<td><span class="badge ' + statusClass + '">' + statusLabel + '</span></td>';
           html += '<td style="font-size:12px;color:var(--pe-text-muted);white-space:nowrap;">' + timeStr + '</td>';
           html += '<td class="actions">';
-          if (cm.status !== 'approved') html += '<button class="pe-btn pe-btn-success" onclick="setCmtStatus(' + cm.objectId + ',\'approved\')">通过</button>';
-          if (cm.status !== 'waiting') html += '<button class="pe-btn pe-btn-warning" onclick="setCmtStatus(' + cm.objectId + ',\'waiting\')">待审</button>';
-          if (cm.status !== 'spam') html += '<button class="pe-btn pe-btn-default" onclick="setCmtStatus(' + cm.objectId + ',\'spam\')">垃圾</button>';
-          html += '<button class="pe-btn pe-btn-danger" onclick="deleteCmt(' + cm.objectId + ')">删除</button>';
+          if (cm.status !== 'approved') html += '<button class="pe-btn pe-btn-success cmt-action" data-action="status" data-id="' + cm.objectId + '" data-status="approved">通过</button>';
+          if (cm.status !== 'waiting') html += '<button class="pe-btn pe-btn-warning cmt-action" data-action="status" data-id="' + cm.objectId + '" data-status="waiting">待审</button>';
+          if (cm.status !== 'spam') html += '<button class="pe-btn pe-btn-default cmt-action" data-action="status" data-id="' + cm.objectId + '" data-status="spam">垃圾</button>';
+          html += '<button class="pe-btn pe-btn-danger cmt-action" data-action="delete" data-id="' + cm.objectId + '">删除</button>';
           html += '</td></tr>';
         });
       }
@@ -553,6 +564,22 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 
       html += '</div>';
       c.innerHTML = html;
+      // 事件委托：处理评论操作按钮（避免 onclick 内联引号嵌套问题）
+      c.addEventListener('click', function(e) {
+        var btn = (e.target as HTMLElement).closest('.cmt-action') as HTMLElement;
+        if (!btn) return;
+        var action = btn.dataset.action, id = btn.dataset.id;
+        if (action === 'status') setCmtStatus(id, btn.dataset.status);
+        else if (action === 'delete') deleteCmt(id);
+      });
+      // 搜索框事件绑定
+      var searchBtn = document.getElementById('cmtSearchBtn');
+      var searchInput = document.getElementById('cmtKeywordInput') as HTMLInputElement;
+      if (searchBtn && searchInput) {
+        var doSearch = function() { cmtKeyword = searchInput.value; loadCommentsPage(1); };
+        searchBtn.addEventListener('click', doSearch);
+        searchInput.addEventListener('keydown', function(e) { if ((e as KeyboardEvent).key === 'Enter') doSearch(); });
+      }
     }).catch(function() {
       c.innerHTML = '<div class="loading-box" style="color:var(--pe-danger);">加载失败，请刷新重试</div>';
     });
