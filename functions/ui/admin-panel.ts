@@ -409,7 +409,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       c.innerHTML = html;
       // 事件委托：处理用户操作按钮（避免 onclick 内联引号嵌套问题）
       c.addEventListener('click', function(e) {
-        var btn = (e.target as HTMLElement).closest('.user-action') as HTMLElement;
+        var btn = e.target.closest('.user-action');
         if (!btn) return;
         var action = btn.dataset.action, id = btn.dataset.id, name = btn.dataset.name;
         if (action === 'role') showSetRoleModal(id, name, btn.dataset.type);
@@ -566,7 +566,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       c.innerHTML = html;
       // 事件委托：处理评论操作按钮（避免 onclick 内联引号嵌套问题）
       c.addEventListener('click', function(e) {
-        var btn = (e.target as HTMLElement).closest('.cmt-action') as HTMLElement;
+        var btn = e.target.closest('.cmt-action');
         if (!btn) return;
         var action = btn.dataset.action, id = btn.dataset.id;
         if (action === 'status') setCmtStatus(id, btn.dataset.status);
@@ -574,11 +574,11 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       });
       // 搜索框事件绑定
       var searchBtn = document.getElementById('cmtSearchBtn');
-      var searchInput = document.getElementById('cmtKeywordInput') as HTMLInputElement;
+      var searchInput = document.getElementById('cmtKeywordInput');
       if (searchBtn && searchInput) {
         var doSearch = function() { cmtKeyword = searchInput.value; loadCommentsPage(1); };
         searchBtn.addEventListener('click', doSearch);
-        searchInput.addEventListener('keydown', function(e) { if ((e as KeyboardEvent).key === 'Enter') doSearch(); });
+        searchInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') doSearch(); });
       }
     }).catch(function() {
       c.innerHTML = '<div class="loading-box" style="color:var(--pe-danger);">加载失败，请刷新重试</div>';
