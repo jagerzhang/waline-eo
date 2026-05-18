@@ -154,6 +154,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       <li>评论策略</li>
       <li>邮件通知</li>
       <li>PushPlus</li>
+      <li>图片上传</li>
+      <li>安全验证</li>
     </ul>
     <div class="layui-tab-content">
 
@@ -370,6 +372,79 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
         </div>
       </div>
 
+      <!-- Tab 6: Image Upload -->
+      <div class="layui-tab-item">
+        <div class="setting-card">
+          <h4>图片存储设置</h4>
+          <div class="pe-form-item">
+            <label>存储类型</label>
+            <select id="set-image-upload-type" onchange="toggleImageConfig(this.value)">
+              <option value="kv">数据库 KV（默认，无需额外配置）</option>
+              <option value="qiniu">七牛云</option>
+              <option value="upyun">又拍云</option>
+            </select>
+            <p class="pe-desc">选择上传图片的存储后端。KV 存储在评论数据库中；七牛/又拍云需填写以下对应配置。仅登录用户可上传图片。</p>
+          </div>
+        </div>
+        <div class="setting-card" id="img-qiniu-config" style="display:none;">
+          <h4>七牛云配置</h4>
+          <div class="pe-form-item">
+            <label>Access Key</label>
+            <input type="text" id="set-qiniu-access-key" placeholder="七牛云 Access Key" />
+          </div>
+          <div class="pe-form-item">
+            <label>Secret Key</label>
+            <input type="password" id="set-qiniu-secret-key" placeholder="七牛云 Secret Key" />
+          </div>
+          <div class="pe-form-item">
+            <label>Bucket 名称</label>
+            <input type="text" id="set-qiniu-bucket" placeholder="存储空间名称" />
+          </div>
+          <div class="pe-form-item">
+            <label>访问域名</label>
+            <input type="url" id="set-qiniu-domain" placeholder="https://cdn.example.com" />
+            <p class="pe-desc">七牛云绑定的 CDN 加速域名，需以 https:// 开头。</p>
+          </div>
+        </div>
+        <div class="setting-card" id="img-upyun-config" style="display:none;">
+          <h4>又拍云配置</h4>
+          <div class="pe-form-item">
+            <label>操作员账号</label>
+            <input type="text" id="set-upyun-operator" placeholder="又拍云操作员用户名" />
+          </div>
+          <div class="pe-form-item">
+            <label>操作员密码</label>
+            <input type="password" id="set-upyun-password" placeholder="又拍云操作员密码" />
+          </div>
+          <div class="pe-form-item">
+            <label>服务名（Bucket）</label>
+            <input type="text" id="set-upyun-bucket" placeholder="又拍云服务名" />
+          </div>
+          <div class="pe-form-item">
+            <label>访问域名</label>
+            <input type="url" id="set-upyun-domain" placeholder="https://cdn.example.com" />
+            <p class="pe-desc">又拍云绑定的自定义域名，需以 https:// 开头。</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 7: Security -->
+      <div class="layui-tab-item">
+        <div class="setting-card">
+          <h4>极验行为验证 4.0</h4>
+          <div class="pe-form-item">
+            <label>Captcha ID（公开键）</label>
+            <input type="text" id="set-geetest-captcha-id" placeholder="从极验控制台获取的 captcha_id" />
+            <p class="pe-desc">在博客前端评论提交前触发极验滑块验证。填入后需同时在博客 config.toml 的 <code style="background:var(--pe-bg-input);padding:1px 5px;border-radius:3px;">params.waline.geetestCaptchaId</code> 填写相同值。</p>
+          </div>
+          <div class="pe-form-item">
+            <label>Captcha Key（后端密钥，不会暴露给前端）</label>
+            <input type="password" id="set-geetest-captcha-key" placeholder="从极验控制台获取的 captcha_key" />
+            <p class="pe-desc">仅用于服务端验证签名，请妥善保管。</p>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -473,6 +548,20 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     setVal('set-push-plus-channel', s.push_plus_channel);
     setVal('set-push-plus-webhook', s.push_plus_webhook);
     setVal('set-push-plus-callbackurl', s.push_plus_callbackurl);
+    // Image upload
+    setVal('set-image-upload-type', s.image_upload_type);
+    toggleImageConfig(s.image_upload_type || 'kv');
+    setVal('set-qiniu-access-key', s.qiniu_access_key);
+    setVal('set-qiniu-secret-key', s.qiniu_secret_key);
+    setVal('set-qiniu-bucket', s.qiniu_bucket);
+    setVal('set-qiniu-domain', s.qiniu_domain);
+    setVal('set-upyun-operator', s.upyun_operator);
+    setVal('set-upyun-password', s.upyun_password);
+    setVal('set-upyun-bucket', s.upyun_bucket);
+    setVal('set-upyun-domain', s.upyun_domain);
+    // Geetest
+    setVal('set-geetest-captcha-id', s.geetest_captcha_id);
+    setVal('set-geetest-captcha-key', s.geetest_captcha_key);
   }).catch(function(){ toast('加载设置失败', false); });
 
   fetchVersions();
@@ -511,6 +600,19 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       push_plus_channel: document.getElementById('set-push-plus-channel').value.trim(),
       push_plus_webhook: document.getElementById('set-push-plus-webhook').value.trim(),
       push_plus_callbackurl: document.getElementById('set-push-plus-callbackurl').value.trim(),
+      // Image upload
+      image_upload_type: document.getElementById('set-image-upload-type').value,
+      qiniu_access_key: document.getElementById('set-qiniu-access-key').value.trim(),
+      qiniu_secret_key: document.getElementById('set-qiniu-secret-key').value.trim(),
+      qiniu_bucket: document.getElementById('set-qiniu-bucket').value.trim(),
+      qiniu_domain: document.getElementById('set-qiniu-domain').value.trim(),
+      upyun_operator: document.getElementById('set-upyun-operator').value.trim(),
+      upyun_password: document.getElementById('set-upyun-password').value.trim(),
+      upyun_bucket: document.getElementById('set-upyun-bucket').value.trim(),
+      upyun_domain: document.getElementById('set-upyun-domain').value.trim(),
+      // Geetest
+      geetest_captcha_id: document.getElementById('set-geetest-captcha-id').value.trim(),
+      geetest_captcha_key: document.getElementById('set-geetest-captcha-key').value.trim(),
     };
     api('/settings', { method: 'PUT', body: JSON.stringify(settings) }).then(function(r) {
       toast(r.errno ? (r.errmsg || '保存失败') : '设置已保存', !r.errno);
@@ -551,6 +653,15 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       result.style.color = 'var(--pe-danger)';
     }).finally(function(){ btn.disabled = false; });
   });
+
+  // Toggle image config panels
+  window.toggleImageConfig = function(type) {
+    var q = document.getElementById('img-qiniu-config');
+    var u = document.getElementById('img-upyun-config');
+    if (q) q.style.display = type === 'qiniu' ? '' : 'none';
+    if (u) u.style.display = type === 'upyun' ? '' : 'none';
+  };
+
 })();
 </script>
 </body>

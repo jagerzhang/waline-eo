@@ -6,6 +6,7 @@ import { renderMarkdown } from '../utils/markdown.js';
 import { getSetting, getSettings } from './settings.js';
 import { sendMail, buildMailSubject, buildMailHtml } from '../utils/mail.js';
 import { sendPushPlus } from '../utils/pushplus.js';
+import { validateGeetest } from '../utils/geetest.js';
 import {
   createComment,
   getCommentById,
@@ -82,6 +83,28 @@ commentRoutes.post('/', async (c) => {
   }
   if (ua && (typeof ua !== 'string' || ua.length > 1024)) {
     return c.json({ errno: 1, errmsg: 'ua is too long (max 1024 chars)' }, 400);
+  }
+
+  // Geetest 4.0 validation (only if configured)
+  const [gtCaptchaId, gtCaptchaKey] = await Promise.all([
+    getSetting('geetest_captcha_id').catch(() => null),
+    getSetting('geetest_captcha_key').catch(() => null),
+  ]);
+  if (gtCaptchaId && gtCaptchaKey) {
+    const { geetest_lot_number, geetest_pass_token, geetest_gen_time } = body;
+    if (!geetest_lot_number || !geetest_pass_token || !geetest_gen_time) {
+      return c.json({ errno: 1, errmsg: '请完成人机验证后再提交评论' }, 400);
+    }
+    const passed = await validateGeetest({
+      captchaId: gtCaptchaId,
+      captchaKey: gtCaptchaKey,
+      lotNumber: geetest_lot_number,
+      passToken: geetest_pass_token,
+      genTime: geetest_gen_time,
+    });
+    if (!passed) {
+      return c.json({ errno: 1, errmsg: '人机验证失败，请刷新页面重试' }, 400);
+    }
   }
 
   // EdgeOne passes client IP via x-real-ip or x-forwarded-for
@@ -401,8 +424,19 @@ commentRoutes.post('/re-render', async (c) => {
     for (const comment of data) {
       total++;
       if (!comment.orig) continue;
+
+      // Only process comments where current HTML has un-rendered emoji
+      // (i.e., comment field contains escaped HTML like &lt;img class=&quot;wl-emoji&quot;)
+      // Skip any comment that contains data:image (user-uploaded base64 images)
+      const currentHtml = comment.comment || '';
+      if (currentHtml.includes('data:image')) continue;
+
+      // Check if there are unrendered emoji: escaped img tags in the HTML
+      const hasUnrenderedEmoji = currentHtml.includes('&lt;img') && currentHtml.includes('wl-emoji');
+      if (!hasUnrenderedEmoji) continue;
+
       const reRendered = renderMarkdown(comment.orig);
-      if (reRendered !== comment.comment) {
+      if (reRendered !== currentHtml) {
         comment.comment = reRendered;
         await updateComment(comment.id, { comment: reRendered });
 
@@ -426,8 +460,12 @@ commentRoutes.post('/re-render', async (c) => {
       let changed = false;
       for (const child of children) {
         if (!child.orig) continue;
+        const currentHtml = child.comment || '';
+        if (currentHtml.includes('data:image')) continue;
+        const hasUnrenderedEmoji = currentHtml.includes('&lt;img') && currentHtml.includes('wl-emoji');
+        if (!hasUnrenderedEmoji) continue;
         const reRendered = renderMarkdown(child.orig);
-        if (reRendered !== child.comment) {
+        if (reRendered !== currentHtml) {
           child.comment = reRendered;
           changed = true;
         }

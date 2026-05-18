@@ -9,6 +9,7 @@ import { tokenRoutes } from './router/token.js';
 import { settingsRoutes } from './router/settings.js';
 import { oauthRoutes } from './router/oauth.js';
 import { dbRoutes } from './router/db.js';
+import { imageRoutes } from './router/image.js';
 import { getWalinePage } from './ui/waline-page.js';
 import { getAdminPage } from './ui/admin-panel.js';
 import { getCustomSettingsPage, get404Page } from './ui/custom-admin.js';
@@ -61,6 +62,7 @@ app.route('/api/token', tokenRoutes);
 app.route('/api/settings', settingsRoutes);
 app.route('/api/oauth', oauthRoutes);
 app.route('/api/db', dbRoutes);
+app.route('/api/image', imageRoutes);
 
 // Worker custom settings page (server-side auth-gated)
 app.get('/ui/worker-setting', async (c) => {

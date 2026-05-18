@@ -49,6 +49,16 @@ const ALLOWED_KEYS = new Set([
   'push_plus_channel',
   'push_plus_webhook',
   'push_plus_callbackurl',
+  // Image upload
+  'image_upload_type',
+  'qiniu_access_key',
+  'qiniu_secret_key',
+  'qiniu_bucket',
+  'qiniu_domain',
+  'upyun_operator',
+  'upyun_password',
+  'upyun_bucket',
+  'upyun_domain',
 ]);
 
 /**
