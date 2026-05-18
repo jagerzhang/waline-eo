@@ -380,6 +380,70 @@ commentRoutes.delete('/:id', async (c) => {
 });
 
 /**
+ * POST /api/comment/re-render - Re-render all comments (admin only)
+ * Used to fix old comments after markdown renderer updates (e.g. emoji img fix)
+ */
+commentRoutes.post('/re-render', async (c) => {
+  const userInfo = c.get('userInfo');
+  if (userInfo?.type !== 'administrator') {
+    return c.json({ errno: 1, errmsg: 'Unauthorized' }, 403);
+  }
+
+  const statuses = ['approved', 'waiting', 'spam'];
+  let total = 0;
+  let fixed = 0;
+
+  // Track which rid groups need child array updates
+  const dirtyRids = new Map<number, KVComment[]>();
+
+  for (const status of statuses) {
+    const { data } = await searchComments({ status, limit: 500, offset: 0 });
+    for (const comment of data) {
+      total++;
+      if (!comment.orig) continue;
+      const reRendered = renderMarkdown(comment.orig);
+      if (reRendered !== comment.comment) {
+        comment.comment = reRendered;
+        await updateComment(comment.id, { comment: reRendered });
+
+        // If this is a child comment, mark its rid group as dirty
+        if (comment.rid !== null) {
+          if (!dirtyRids.has(comment.rid)) {
+            dirtyRids.set(comment.rid, []);
+          }
+        }
+        fixed++;
+      }
+    }
+  }
+
+  // Update child comment copies in comments:rid:{rid} arrays
+  for (const [rid] of dirtyRids) {
+    try {
+      const raw = await WALINE_KV.get(`comments:rid:${rid}`);
+      if (!raw) continue;
+      const children: KVComment[] = typeof raw === 'string' ? JSON.parse(raw) : raw as KVComment[];
+      let changed = false;
+      for (const child of children) {
+        if (!child.orig) continue;
+        const reRendered = renderMarkdown(child.orig);
+        if (reRendered !== child.comment) {
+          child.comment = reRendered;
+          changed = true;
+        }
+      }
+      if (changed) {
+        await WALINE_KV.put(`comments:rid:${rid}`, JSON.stringify(children));
+      }
+    } catch (e) {
+      console.error(`[re-render] Failed to update children of rid:${rid}`, e);
+    }
+  }
+
+  return c.json({ errno: 0, errmsg: `已扫描 ${total} 条评论，重新渲染 ${fixed} 条` });
+});
+
+/**
  * GET /api/comment/rss - RSS feed for comments
  * Query params:
  *   - path: filter by page path

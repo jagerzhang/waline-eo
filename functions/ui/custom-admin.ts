@@ -376,6 +376,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
   <!-- Save button -->
   <div class="pe-actions">
     <button class="pe-btn pe-btn-primary" id="save-btn"><i class="layui-icon layui-icon-ok"></i> 保存设置</button>
+    <button class="pe-btn" id="rerender-btn" style="margin-left:12px;background:var(--pe-warning);color:#fff;"><i class="layui-icon layui-icon-refresh"></i> 重新渲染评论</button>
+    <span id="rerender-result" style="margin-left:12px;font-size:13px;"></span>
   </div>
 </div>
 
@@ -527,6 +529,23 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       result.textContent = r.errmsg || (r.errno ? '发送失败' : '发送成功');
       result.style.color = r.errno ? 'var(--pe-danger)' : 'var(--pe-success)';
       if (!r.errno) toast('测试邮件已发送', true);
+    }).catch(function(e) {
+      result.textContent = '请求失败: ' + (e.message || '');
+      result.style.color = 'var(--pe-danger)';
+    }).finally(function(){ btn.disabled = false; });
+  });
+
+  // Re-render all comments
+  document.getElementById('rerender-btn').addEventListener('click', function() {
+    var btn = this;
+    var result = document.getElementById('rerender-result');
+    if (!confirm('将重新渲染所有评论的 HTML（修复表情等显示问题），是否继续？')) return;
+    btn.disabled = true;
+    result.textContent = '处理中...'; result.style.color = 'var(--pe-text-muted)';
+    api('/comment/re-render', { method: 'POST' }).then(function(r) {
+      result.textContent = r.errmsg || (r.errno ? '渲染失败' : '完成');
+      result.style.color = r.errno ? 'var(--pe-danger)' : 'var(--pe-success)';
+      if (!r.errno) toast(r.errmsg || '重新渲染完成', true);
     }).catch(function(e) {
       result.textContent = '请求失败: ' + (e.message || '');
       result.style.color = 'var(--pe-danger)';
