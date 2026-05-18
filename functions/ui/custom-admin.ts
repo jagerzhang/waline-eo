@@ -19,10 +19,7 @@ export function get404Page(): string {
 /**
  * Returns the Layui-styled settings page (only served to authenticated admins)
  */
-export function getCustomSettingsPage(requestUrl: string): string {
-  const url = new URL(requestUrl);
-  const apiBase = url.origin;
-
+export function getCustomSettingsPage(_requestUrl: string): string {
   return `<!doctype html>
 <html>
 <head>
@@ -459,7 +456,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 <script src="https://cdn.jsdelivr.net/npm/layui@2.13.5/dist/layui.js"></script>
 <script>
 (function(){
-  var API = ${JSON.stringify(apiBase)};
+  var API = location.origin;
   var token = localStorage.getItem('TOKEN') || sessionStorage.getItem('TOKEN');
 
   // Layui element for tabs

@@ -8,8 +8,6 @@ import { getSetting } from '../router/settings.js';
 
 export async function getAdminPage(env: Env, requestUrl: string): Promise<string> {
   const url = new URL(requestUrl);
-  const origin = url.origin;
-  const apiBase = origin;
   // 兼容旧版 @waline/admin 的 /ui/profile?token=... 跳转：将 token 提取后注入，页面端完成存储并重定向
   const urlToken = url.searchParams.get('token') || '';
 
@@ -235,8 +233,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 <script src="https://cdn.jsdelivr.net/npm/layui@2.13.5/dist/layui.js"></script>
 <script>
 (function(){
-  // token 已在上方早期脚本处理，此处无需重复检查
-  var API = ${JSON.stringify(apiBase)};
+  // API 地址直接从浏览器 location.origin 获取，无需服务端注入
+  var API = location.origin;
   var token = localStorage.getItem('TOKEN') || sessionStorage.getItem('TOKEN');
   var currentUser = null;
 
