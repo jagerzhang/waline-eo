@@ -2,6 +2,9 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 import { getAvatar } from '../utils/avatar.js';
+import { signJwt } from '../middleware/auth.js';
+import { getSetting, getSettings } from './settings.js';
+import { sendMail, buildMailSubject, buildMailHtml } from '../utils/mail.js';
 import {
   createUser,
   getUserById,
@@ -88,10 +91,10 @@ userRoutes.post('/', async (c) => {
     return c.json({ errno: 1, errmsg: 'email and password are required' }, 400);
   }
 
-  // Check if email exists
+  // Check if email exists (allow re-registration of unverified users)
   const existing = await getUserByEmail(email);
 
-  if (existing) {
+  if (existing && ['administrator', 'guest'].includes(existing.type as string)) {
     return c.json({ errno: 1, errmsg: 'Registration failed' }, 409);
   }
 
@@ -99,21 +102,144 @@ userRoutes.post('/', async (c) => {
   const userCount = await getUserCount();
   const isFirst = userCount === 0;
 
-  const hashedPassword = await hashPassword(password);
+  // Check if SMTP is configured for email verification
+  const settingKeys = [
+    'smtp_service', 'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_secure',
+    'sender_name', 'sender_email', 'site_name', 'site_url',
+  ];
+  const kvSettings = await getSettings(settingKeys);
+  const cfg = (key: string) => kvSettings[key] || (c.env as any)[key.toUpperCase()] || '';
+  const hasMailService = cfg('smtp_host') || cfg('smtp_service');
 
-  const newUser = await createUser({
+  const token = Array.from({ length: 4 }, () => Math.round(Math.random() * 9)).join('');
+  const normalType = hasMailService
+    ? `verify:${token}:${Date.now() + 1 * 60 * 60 * 1000}`
+    : 'guest';
+
+  const hashedPassword = await hashPassword(password);
+  const userData = {
     display_name: display_name || email.split('@')[0],
     email,
     password: hashedPassword,
-    type: isFirst ? 'administrator' : 'guest',
+    type: isFirst ? 'administrator' : normalType,
     url: url || '',
-  });
+  };
+
+  if (existing) {
+    // Re-register unverified user
+    await updateUser(existing.id as number, userData);
+  } else {
+    await createUser(userData);
+  }
+
+  // If verification needed, send email
+  if (!isFirst && hasMailService) {
+    const siteName = cfg('site_name') || 'Waline';
+    const serverUrl = (cfg('site_url') || new URL(c.req.url).origin).replace(/\/$/, '');
+    const verifyUrl = `${serverUrl}/api/verification?token=${token}&email=${encodeURIComponent(email)}`;
+
+    const mailConfig = {
+      smtpService: cfg('smtp_service'),
+      smtpHost: cfg('smtp_host'),
+      smtpPort: cfg('smtp_port'),
+      smtpSecure: cfg('smtp_secure'),
+      smtpUser: cfg('smtp_user'),
+      smtpPass: cfg('smtp_pass'),
+      senderName: cfg('sender_name'),
+      senderEmail: cfg('sender_email'),
+    };
+
+    try {
+      await sendMail(mailConfig, {
+        to: email,
+        subject: `[${siteName}] 注册确认 / Registration Confirm`,
+        html: `<p>请点击以下链接确认注册，链接有效期 1 小时：</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>如果您没有注册，请忽略此邮件。</p>`,
+      });
+    } catch (e) {
+      console.error('[Verify Mail Error]', e);
+      return c.json({ errno: 1, errmsg: 'Failed to send verification email' }, 500);
+    }
+
+    return c.json({ errno: 0, errmsg: '', data: { verify: true } }, 201);
+  }
+
+  const newUser = existing
+    ? await getUserByEmail(email)
+    : await getUserByEmail(email);
 
   return c.json({
     errno: 0,
     errmsg: '',
     data: await formatUser(newUser),
   }, 201);
+});
+
+/**
+ * PUT /api/user/password - Request password reset email
+ * MUST be defined before PUT /:id to avoid route conflict
+ */
+userRoutes.put('/password', async (c) => {
+  const body = await c.req.json();
+  const { email } = body;
+
+  if (!email) {
+    return c.json({ errno: 1, errmsg: 'email is required' }, 400);
+  }
+
+  // Check mail service availability
+  const settingKeys = [
+    'smtp_service', 'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_secure',
+    'sender_name', 'sender_email', 'site_name', 'site_url',
+  ];
+  const kvSettings = await getSettings(settingKeys);
+  const cfg = (key: string) => kvSettings[key] || (c.env as any)[key.toUpperCase()] || '';
+
+  const hasMailService = cfg('smtp_host') || cfg('smtp_service');
+  if (!hasMailService) {
+    return c.json({ errno: 1, errmsg: 'Mail service not configured' }, 500);
+  }
+
+  const user = await getUserByEmail(email);
+  if (!user) {
+    // Don't reveal whether email exists — return success silently
+    return c.json({ errno: 0, errmsg: '' });
+  }
+
+  const jwtSecret = c.env.JWT_SECRET;
+  if (!jwtSecret) {
+    return c.json({ errno: 1, errmsg: 'JWT secret not configured' }, 500);
+  }
+
+  // Generate a short-lived token (1 hour)
+  const token = await signJwt({ id: user.id as number }, jwtSecret, 3600);
+  const siteUrl = cfg('site_url') || '';
+  const siteName = cfg('site_name') || 'Waline';
+  const serverUrl = siteUrl ? siteUrl.replace(/\/$/, '') : new URL(c.req.url).origin;
+  const profileUrl = `${serverUrl}/ui/profile?token=${token}`;
+
+  const mailConfig = {
+    smtpService: cfg('smtp_service'),
+    smtpHost: cfg('smtp_host'),
+    smtpPort: cfg('smtp_port'),
+    smtpSecure: cfg('smtp_secure'),
+    smtpUser: cfg('smtp_user'),
+    smtpPass: cfg('smtp_pass'),
+    senderName: cfg('sender_name'),
+    senderEmail: cfg('sender_email'),
+  };
+
+  try {
+    await sendMail(mailConfig, {
+      to: email,
+      subject: `[${siteName}] 重置密码 / Reset Password`,
+      html: `<p>请点击以下链接登录并修改密码：</p><p><a href="${profileUrl}">${profileUrl}</a></p><p>此链接将在 1 小时后失效。</p>`,
+    });
+  } catch (e) {
+    console.error('[Password Reset Mail Error]', e);
+    return c.json({ errno: 1, errmsg: 'Failed to send email' }, 500);
+  }
+
+  return c.json({ errno: 0, errmsg: '' });
 });
 
 /**

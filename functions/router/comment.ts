@@ -19,6 +19,7 @@ import {
   getCommentCountByUrl,
   getCommentCountsByUrls,
   searchComments,
+  getUserCommentCount,
   type KVComment,
 } from '../db/kv-store.js';
 
@@ -601,6 +602,62 @@ commentRoutes.get('/rss', async (c) => {
 
 // --- Helper functions ---
 
+// Level thresholds: default [0, 10, 20, 50, 100, 200]
+function getLevel(count: number, levels: number[]): number {
+  if (!count || levels.length === 0) return 0;
+  let level = 0;
+  for (let i = levels.length - 1; i >= 0; i--) {
+    if (count >= levels[i]) {
+      level = i;
+      break;
+    }
+  }
+  return level;
+}
+
+async function getLevelsConfig(): Promise<number[] | false> {
+  const raw = await getSetting('levels').catch(() => null);
+  if (raw === null || raw === undefined) {
+    // Default levels
+    return [0, 10, 20, 50, 100, 200];
+  }
+  if (raw === 'false' || raw === '0' || raw === '') return false;
+  return raw.split(/\s*,\s*/).map(Number).filter((n) => !isNaN(n));
+}
+
+async function computeLevels(comments: any[]): Promise<Map<string, number>> {
+  const levelMap = new Map<string, number>();
+  const levels = await getLevelsConfig();
+  if (!levels) return levelMap;
+
+  // Collect unique user_ids
+  const userIds = [...new Set(comments.map((c) => c.user_id).filter(Boolean))] as number[];
+
+  // Batch fetch comment counts for each user
+  const countMap = new Map<number, number>();
+  await Promise.all(
+    userIds.map(async (uid) => {
+      const count = await getUserCommentCount(uid);
+      countMap.set(uid, count);
+    }),
+  );
+
+  // Assign levels
+  for (const cmt of comments) {
+    const key = cmt.user_id ? `uid:${cmt.user_id}` : `mail:${cmt.mail || ''}`;
+    if (!levelMap.has(key)) {
+      const count = cmt.user_id ? (countMap.get(cmt.user_id) || 0) : 0;
+      levelMap.set(key, getLevel(count, levels));
+    }
+  }
+
+  return levelMap;
+}
+
+function getLevelKey(cmt: any): string {
+  return cmt.user_id ? `uid:${cmt.user_id}` : `mail:${cmt.mail || ''}`;
+}
+
 async function getCommentList(c: any) {
   const path = c.req.query('path');
   if (!path) {
@@ -631,16 +688,46 @@ async function getCommentList(c: any) {
   const rootIds = rootComments.map((r: any) => r.id);
   const children = await getChildCommentsByRids(rootIds, 'approved');
 
+  // Build a lookup map for reply_user (all comments by id)
+  const allComments = [...rootComments, ...children];
+  const commentMap = new Map<number, any>();
+  for (const cmt of allComments) {
+    commentMap.set(cmt.id, cmt);
+  }
+
+  // Compute levels in batch
+  const levelMap = await computeLevels(allComments);
+
   // Build threaded structure
   const data = await Promise.all(
-    rootComments.map(async (root: any) => ({
-      ...(await formatComment(root, false, c.env)),
-      children: await Promise.all(
-        children
-          .filter((child: any) => child.rid === root.id)
-          .map((child: any) => formatComment(child, false, c.env)),
-      ),
-    })),
+    rootComments.map(async (root: any) => {
+      const rootChildren = children
+        .filter((child: any) => child.rid === root.id);
+      const formattedChildren = await Promise.all(
+        rootChildren.map(async (child: any) => {
+          const formatted = await formatComment(child, false, c.env);
+          // Add reply_user: look up the parent comment by pid
+          if (child.pid && child.pid !== child.rid) {
+            const parent = commentMap.get(child.pid);
+            if (parent) {
+              (formatted as any).reply_user = {
+                nick: parent.nick || '',
+                link: parent.link || '',
+                avatar: await getAvatar(parent.mail || ''),
+              };
+            }
+          }
+          (formatted as any).level = levelMap.get(getLevelKey(child)) || 0;
+          return formatted;
+        }),
+      );
+      const formattedRoot = await formatComment(root, false, c.env);
+      (formattedRoot as any).level = levelMap.get(getLevelKey(root)) || 0;
+      return {
+        ...formattedRoot,
+        children: formattedChildren.reverse(),
+      };
+    }),
   );
 
   return c.json({
@@ -678,11 +765,11 @@ async function getCommentCountHandler(c: any) {
     return c.json({
       errno: 0,
       errmsg: '',
-      data: [count],
+      data: count,
     });
   }
 
-  const countMap = await getCommentCountsByUrls(paths, 'approved');
+  const countMap = await getCommentCountsByUrls(paths);
   return c.json({
     errno: 0,
     errmsg: '',
@@ -758,7 +845,7 @@ async function formatComment(row: any, isAdmin = false, env?: Env) {
     url: row.url,
     pid: row.pid,
     rid: row.rid,
-    sticky: Boolean(row.sticky),
+    sticky: Boolean(Number(row.sticky)),
     user_id: row.user_id,
   };
 

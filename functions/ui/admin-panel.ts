@@ -173,6 +173,12 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 /* ===== Comment content ===== */
 .comment-text { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pe-text-secondary); font-size: 12px; }
 
+/* ===== Import / Export ===== */
+.import-log { background: var(--pe-bg-input); border: 1px solid var(--pe-border); border-radius: var(--pe-radius-sm); padding: 12px 16px; font-size: 12px; font-family: monospace; max-height: 260px; overflow-y: auto; color: var(--pe-text-secondary); white-space: pre-wrap; word-break: break-all; line-height: 1.6; }
+.import-log .log-ok  { color: var(--pe-success); }
+.import-log .log-err { color: var(--pe-danger); }
+.import-log .log-info { color: var(--pe-accent); }
+
 /* ===== Loading ===== */
 .loading-box { text-align: center; padding: 40px; color: var(--pe-text-muted); font-size: 14px; }
 
@@ -328,6 +334,9 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       </a>
       <a class="nav-item" data-page="comments" id="navComments">
         <i class="layui-icon layui-icon-chat"></i> 评论管理
+      </a>
+      <a class="nav-item" data-page="db" id="navDb">
+        <i class="layui-icon layui-icon-transfer"></i> 数据管理
       </a>
       <div class="nav-group-label" style="margin-top:8px;">个人</div>
       <a class="nav-item" data-page="profile" id="navProfile">
@@ -512,6 +521,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     document.getElementById('navGroupAdmin').style.display = isAdmin ? '' : 'none';
     document.getElementById('navUsers').style.display = isAdmin ? '' : 'none';
     document.getElementById('navComments').style.display = isAdmin ? '' : 'none';
+    document.getElementById('navDb').style.display = isAdmin ? '' : 'none';
     document.getElementById('navGroupSystem').style.display = isAdmin ? '' : 'none';
     document.getElementById('navWorkerSetting').style.display = isAdmin ? '' : 'none';
   }
@@ -626,6 +636,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     if (page === 'users')    loadUsersPage();
     else if (page === 'comments') loadCommentsPage();
     else if (page === 'profile')  loadProfilePage();
+    else if (page === 'db')       loadDbPage();
   }
 
   /* ============ USERS PAGE ============ */
@@ -1017,6 +1028,137 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
         if (d.errno === 0) { toast('两步验证已开启'); mask.remove(); loadProfilePage(); }
         else toast(d.errmsg||'验证码错误，请重试', false);
       }).catch(function(){ toast('请求失败', false); });
+    });
+  }
+
+  /* ============ DB PAGE (Import / Export) ============ */
+  function loadDbPage() {
+    var c = document.getElementById('adminContent');
+    c.innerHTML =
+      '<div class="content-header"><h2>数据管理</h2><p>导出或导入 Waline 标准格式的数据（Comment / Counter / Users 三张表）</p></div>' +
+      '<div class="pe-card">' +
+        '<div class="pe-card-title">导出数据</div>' +
+        '<p style="font-size:13px;color:var(--pe-text-secondary);margin:0 0 14px;">将当前全部数据打包为 Waline 通用 JSON 格式，可用于备份或迁移到其他 Waline 实例。</p>' +
+        '<button class="pe-btn pe-btn-primary" id="exportBtn"><i class="layui-icon layui-icon-download-circle"></i> 导出所有数据</button>' +
+        '<span id="exportStatus" style="margin-left:12px;font-size:13px;color:var(--pe-text-muted);"></span>' +
+      '</div>' +
+      '<div class="pe-card">' +
+        '<div class="pe-card-title">导入数据</div>' +
+        '<p style="font-size:13px;color:var(--pe-text-secondary);margin:0 0 4px;">选择 Waline 标准格式的 JSON 文件。导入前将<strong style="color:var(--pe-danger);">清空</strong>对应表中的现有数据，请先导出备份。</p>' +
+        '<p style="font-size:12px;color:var(--pe-text-muted);margin:0 0 14px;">支持来自 @waline/admin 或本系统导出的 JSON 文件（含 Comment、Counter、Users）。</p>' +
+        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;">' +
+          '<label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;padding:7px 14px;border:1px solid var(--pe-border);border-radius:var(--pe-radius-sm);background:var(--pe-bg-input);font-size:13px;" id="fileLabel">' +
+            '<i class="layui-icon layui-icon-upload"></i> <span id="fileLabelText">选择 JSON 文件</span>' +
+          '</label>' +
+          '<input type="file" id="importFile" accept=".json,application/json" style="display:none;">' +
+          '<button class="pe-btn pe-btn-warning" id="importBtn" disabled><i class="layui-icon layui-icon-transfer"></i> 开始导入</button>' +
+        '</div>' +
+        '<div id="importLog" class="import-log" style="display:none;"></div>' +
+      '</div>';
+
+    /* ---- 导出 ---- */
+    c.querySelector('#exportBtn').addEventListener('click', function() {
+      var btn = this;
+      var status = c.querySelector('#exportStatus');
+      btn.disabled = true;
+      status.textContent = '正在导出...';
+      status.style.color = 'var(--pe-text-muted)';
+      api('/db').then(function(d) {
+        if (d.errno !== 0) { status.textContent = d.errmsg || '导出失败'; status.style.color = 'var(--pe-danger)'; btn.disabled = false; return; }
+        var blob = new Blob([JSON.stringify(d.data, null, 2)], { type: 'application/json' });
+        var url  = URL.createObjectURL(blob);
+        var a    = document.createElement('a');
+        a.href   = url;
+        a.download = 'waline-backup-' + new Date().toISOString().slice(0,10) + '.json';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        status.textContent = '导出成功！';
+        status.style.color = 'var(--pe-success)';
+        btn.disabled = false;
+      }).catch(function(e) {
+        status.textContent = '请求失败：' + (e.message || '');
+        status.style.color = 'var(--pe-danger)';
+        btn.disabled = false;
+      });
+    });
+
+    /* ---- 文件选择 ---- */
+    var fileInput  = c.querySelector('#importFile');
+    var importBtn  = c.querySelector('#importBtn');
+    var fileLabelText = c.querySelector('#fileLabelText');
+    c.querySelector('#fileLabel').addEventListener('click', function(){ fileInput.click(); });
+    fileInput.addEventListener('change', function() {
+      if (this.files && this.files[0]) {
+        fileLabelText.textContent = this.files[0].name;
+        importBtn.disabled = false;
+      }
+    });
+
+    /* ---- 导入 ---- */
+    importBtn.addEventListener('click', function() {
+      var file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      if (!confirm('导入将清空现有的 Comment、Counter、Users 数据，确定继续？')) return;
+
+      var logEl = c.querySelector('#importLog');
+      logEl.style.display = '';
+      logEl.innerHTML = '';
+      importBtn.disabled = true;
+
+      function log(msg, type) {
+        var span = document.createElement('span');
+        span.className = type ? 'log-' + type : '';
+        span.textContent = msg + '\\n';
+        logEl.appendChild(span);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        var data;
+        try { data = JSON.parse(ev.target.result); }
+        catch(e) { log('❌ JSON 解析失败：' + e.message, 'err'); importBtn.disabled = false; return; }
+
+        if (!data || !data.data) { log('❌ 不是有效的 Waline 导出格式（缺少 data 字段）', 'err'); importBtn.disabled = false; return; }
+
+        var tables = ['Comment', 'Counter', 'Users'];
+        var total = 0, done = 0, fail = 0;
+        tables.forEach(function(t) { total += (data.data[t] || []).length; });
+        log('📋 文件解析成功。Comment: ' + (data.data.Comment||[]).length + ' 条，Counter: ' + (data.data.Counter||[]).length + ' 条，Users: ' + (data.data.Users||[]).length + ' 条', 'info');
+
+        /* 串行处理：清空 → 逐条插入 */
+        function processTable(idx) {
+          if (idx >= tables.length) {
+            log('\\n✅ 导入完成！成功 ' + done + ' 条，失败 ' + fail + ' 条', fail ? 'err' : 'ok');
+            importBtn.disabled = false;
+            return;
+          }
+          var t = tables[idx];
+          var rows = data.data[t] || [];
+          if (!rows.length) { log('[' + t + '] 无数据，跳过', 'info'); processTable(idx + 1); return; }
+
+          log('\\n[' + t + '] 清空旧数据...', 'info');
+          api('/db?table=' + t, { method: 'DELETE' }).then(function() {
+            log('[' + t + '] 清空完成，开始写入 ' + rows.length + ' 条...', 'info');
+            var i = 0;
+            function insertNext() {
+              if (i >= rows.length) { processTable(idx + 1); return; }
+              var row = rows[i++];
+              api('/db?table=' + t, { method: 'POST', body: JSON.stringify(row) }).then(function(r) {
+                if (r.errno === 0) { done++; } else { fail++; log('[' + t + '] 第 ' + i + ' 条失败：' + (r.errmsg||'unknown'), 'err'); }
+                insertNext();
+              }).catch(function(e) { fail++; log('[' + t + '] 第 ' + i + ' 条网络错误：' + (e.message||''), 'err'); insertNext(); });
+            }
+            insertNext();
+          }).catch(function(e) {
+            log('[' + t + '] 清空失败：' + (e.message||''), 'err');
+            processTable(idx + 1);
+          });
+        }
+        processTable(0);
+      };
+      reader.onerror = function() { log('❌ 文件读取失败', 'err'); importBtn.disabled = false; };
+      reader.readAsText(file);
     });
   }
 

@@ -360,6 +360,15 @@ async function removeUserCommentId(userId: number, id: number): Promise<void> {
 
 // --- 核心 API ---
 
+export async function getUserCommentCount(userId: number): Promise<number> {
+  const key = `index:comments:user:${userId}:recent`;
+  const raw = await getJson<number[]>(key);
+  const ids = Array.isArray(raw) ? raw : [];
+  if (ids.length === 0) return 0;
+  const comments = await getCommentsByIds(ids);
+  return comments.filter((c) => c.status === 'approved').length;
+}
+
 export async function createComment(data: Partial<KVComment>): Promise<KVComment> {
   const id = await getNextId('meta:next_comment_id');
   const now = nowIso();
