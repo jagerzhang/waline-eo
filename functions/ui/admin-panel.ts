@@ -194,6 +194,10 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       <a class="nav-item" data-page="comments" id="navComments">
         <i class="layui-icon layui-icon-chat"></i> 评论管理
       </a>
+      <div class="nav-group-label" style="margin-top:8px;">个人</div>
+      <a class="nav-item" data-page="profile" id="navProfile">
+        <i class="layui-icon layui-icon-user"></i> 个人资料
+      </a>
       <div class="nav-group-label" style="margin-top:8px;">系统</div>
       <a class="nav-item" href="/ui/worker-setting" target="_self">
         <i class="layui-icon layui-icon-set"></i> 评论系统设置
@@ -224,7 +228,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 (function(){
   var t = ${JSON.stringify(urlToken)};
   if (t) {
-    try { localStorage.setItem('TOKEN', t); } catch(e) {}
+    try { localStorage.setItem('TOKEN', t); document.cookie = 'TOKEN=' + encodeURIComponent(t) + ';path=/;max-age=2592000;SameSite=Lax;Secure'; } catch(e) {}
     location.replace('/ui');
   }
 })();
@@ -243,7 +247,12 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     opts = opts || {};
     var headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
     if (token) headers['Authorization'] = 'Bearer ' + token;
-    return fetch(API + '/api' + path, Object.assign({}, opts, { headers: headers })).then(function(r){ return r.json(); });
+    return fetch(API + '/api' + path, Object.assign({}, opts, { headers: headers })).then(function(r){
+      return r.text().then(function(txt){
+        try { return JSON.parse(txt); }
+        catch(e) { return { errno: 1, errmsg: '服务器返回非 JSON 响应' }; }
+      });
+    });
   }
 
   // ===== Toast =====
@@ -276,14 +285,23 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
   // ===== 导航 =====
   document.getElementById('navUsers').addEventListener('click', function(){ navTo('users'); });
   document.getElementById('navComments').addEventListener('click', function(){ navTo('comments'); });
+  document.getElementById('navProfile').addEventListener('click', function(){ navTo('profile'); });
+  document.getElementById('sidebarAvatar').style.cursor = 'pointer';
+  document.getElementById('sidebarAvatar').addEventListener('click', function(){ navTo('profile'); });
 
   // ===== Init =====
   function init() {
     if (!token) { showLogin(); return; }
     api('/token').then(function(d) {
-      if (d.errno === 0 && d.data && d.data.type === 'administrator') {
+      if (d.errno === 0 && d.data) {
         currentUser = d.data;
-        showAdmin();
+        if (d.data.type === 'administrator') {
+          showAdmin();
+        } else {
+          // 非管理员也能进入个人资料页
+          showAdmin();
+          navTo('profile');
+        }
       } else {
         token = null;
         localStorage.removeItem('TOKEN');
@@ -320,6 +338,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
         }
         token = d.data.token;
         localStorage.setItem('TOKEN', token);
+        // 同步写入 cookie，方便页面导航（如 /ui/worker-setting）时服务端鉴权
+        document.cookie = 'TOKEN=' + encodeURIComponent(token) + ';path=/;max-age=2592000;SameSite=Lax;Secure';
         currentUser = d.data;
         showAdmin();
       } else {
@@ -340,6 +360,13 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       document.getElementById('sidebarName').textContent = currentUser.display_name || currentUser.email || '管理员';
       document.getElementById('sidebarRole').textContent = currentUser.type || 'administrator';
       if (currentUser.avatar) document.getElementById('sidebarAvatar').src = currentUser.avatar;
+      // 非管理员隐藏管理专属导航
+      if (currentUser.type !== 'administrator') {
+        document.getElementById('navUsers').style.display = 'none';
+        document.getElementById('navComments').style.display = 'none';
+        var settingLink = document.querySelector('.nav-item[href="/ui/worker-setting"]');
+        if (settingLink) settingLink.style.display = 'none';
+      }
     }
     navTo('users');
   }
@@ -347,6 +374,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
   document.getElementById('logoutBtn').addEventListener('click', function() {
     localStorage.removeItem('TOKEN');
     sessionStorage.removeItem('TOKEN');
+    document.cookie = 'TOKEN=;path=/;max-age=0';
     token = null;
     currentUser = null;
     showLogin();
@@ -358,6 +386,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     if (active) active.classList.add('active');
     if (page === 'users') loadUsersPage();
     else if (page === 'comments') loadCommentsPage();
+    else if (page === 'profile') loadProfilePage();
   }
 
   // ===== Users Page =====
@@ -526,6 +555,91 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       if (d.errno === 0) { toast('用户已删除'); loadUsersPage(usersPage); }
       else toast(d.errmsg || '操作失败', false);
     }).catch(function(){ toast('请求失败', false); });
+  }
+
+  // ===== Profile Page =====
+  function loadProfilePage() {
+    var c = document.getElementById('adminContent');
+    c.innerHTML = '<div class="loading-box"><i class="layui-icon layui-icon-loading layui-anim layui-anim-rotate layui-anim-loop"></i> 加载中...</div>';
+    api('/token').then(function(d) {
+      if (d.errno !== 0 || !d.data) {
+        c.innerHTML = '<div class="loading-box" style="color:var(--pe-danger);">获取用户信息失败</div>';
+        return;
+      }
+      var u = d.data;
+      var avatar = u.avatar || 'https://cravatar.cn/avatar/?d=mp&s=80';
+      var html = '<div class="content-header"><h2>个人资料</h2><p>修改你的昵称、头像和个人信息</p></div>';
+      html += '<div class="pe-card" style="max-width:600px;">';
+      html += '<div style="display:flex;align-items:center;gap:20px;margin-bottom:24px;">';
+      html += '<img id="profileAvatar" src="' + esc(avatar) + '" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:3px solid var(--pe-accent-bg);" data-fb="https://cravatar.cn/avatar/?d=mp">';
+      html += '<div><div style="font-size:16px;font-weight:600;">' + esc(u.display_name || '未设置昵称') + '</div>';
+      html += '<div style="font-size:13px;color:var(--pe-text-muted);">' + esc(u.email || '') + '</div>';
+      html += '<div style="font-size:12px;color:var(--pe-text-muted);margin-top:2px;">ID: ' + esc(String(u.objectId || '')) + '</div>';
+      html += '</div></div>';
+
+      html += '<div class="field"><label>昵称</label><input type="text" id="profileName" value="' + esc(u.display_name || '') + '" placeholder="输入昵称"></div>';
+      html += '<div class="field"><label>头像 URL</label><input type="text" id="profileAvatarUrl" value="' + esc(u.avatar || '') + '" placeholder="头像图片地址"></div>';
+      html += '<div class="field"><label>个人网站</label><input type="text" id="profileUrl" value="' + esc(u.url || '') + '" placeholder="https://example.com"></div>';
+
+      html += '<div style="border-top:1px solid var(--pe-border);margin:24px 0 16px;padding-top:16px;">';
+      html += '<h3 style="font-size:14px;font-weight:600;margin:0 0 16px;">修改密码</h3>';
+      html += '<div class="field"><label>新密码</label><input type="password" id="profileNewPwd" placeholder="留空则不修改"></div>';
+      html += '<div class="field"><label>确认新密码</label><input type="password" id="profileNewPwdConfirm" placeholder="再次输入新密码"></div>';
+      html += '</div>';
+
+      html += '<div style="display:flex;gap:8px;">';
+      html += '<button class="pe-btn pe-btn-primary" id="profileSaveBtn">保存修改</button>';
+      html += '</div>';
+      html += '</div>';
+
+      c.innerHTML = html;
+
+      // 头像预览
+      var avatarInput = c.querySelector('#profileAvatarUrl');
+      var avatarImg = c.querySelector('#profileAvatar');
+      avatarInput.addEventListener('input', function() {
+        if (this.value) avatarImg.src = this.value;
+        else avatarImg.src = 'https://cravatar.cn/avatar/?d=mp&s=80';
+      });
+      avatarImg.addEventListener('error', function(){ this.src = this.dataset.fb; });
+
+      // 保存
+      c.querySelector('#profileSaveBtn').addEventListener('click', function() {
+        var updates = {};
+        var newName = c.querySelector('#profileName').value.trim();
+        var newAvatar = c.querySelector('#profileAvatarUrl').value.trim();
+        var newUrl = c.querySelector('#profileUrl').value.trim();
+        var newPwd = c.querySelector('#profileNewPwd').value;
+        var newPwdConfirm = c.querySelector('#profileNewPwdConfirm').value;
+
+        if (newName) updates.display_name = newName;
+        if (newAvatar) updates.avatar = newAvatar;
+        updates.url = newUrl;
+
+        if (newPwd) {
+          if (newPwd.length < 6) { toast('密码至少 6 位', false); return; }
+          if (newPwd !== newPwdConfirm) { toast('两次密码不一致', false); return; }
+          updates.password = newPwd;
+        }
+
+        api('/user/' + u.objectId, { method: 'PUT', body: JSON.stringify(updates) }).then(function(d) {
+          if (d.errno === 0) {
+            toast('资料已更新');
+            // 更新侧边栏
+            if (d.data) {
+              if (d.data.display_name) document.getElementById('sidebarName').textContent = d.data.display_name;
+              if (d.data.avatar) document.getElementById('sidebarAvatar').src = d.data.avatar;
+            }
+            c.querySelector('#profileNewPwd').value = '';
+            c.querySelector('#profileNewPwdConfirm').value = '';
+          } else {
+            toast(d.errmsg || '保存失败', false);
+          }
+        }).catch(function(){ toast('请求失败', false); });
+      });
+    }).catch(function() {
+      c.innerHTML = '<div class="loading-box" style="color:var(--pe-danger);">加载失败，请刷新重试</div>';
+    });
   }
 
   // ===== Comments Page =====

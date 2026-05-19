@@ -11,7 +11,7 @@ export const auth = createMiddleware<{
   Bindings: Env;
   Variables: Variables;
 }>(async (c, next) => {
-  // Check Authorization header first, then URL ?token= query param
+  // Check Authorization header first, then URL ?token= query param, then cookie
   const header = c.req.header('Authorization');
   let token: string | undefined;
   if (header?.startsWith('Bearer ')) {
@@ -21,6 +21,11 @@ export const auth = createMiddleware<{
     // Fallback: @waline/admin passes token as URL query param (e.g. /ui/profile?token=...)
     const urlToken = new URL(c.req.url).searchParams.get('token');
     if (urlToken) token = urlToken;
+  }
+  if (!token) {
+    // Fallback: token stored in cookie (for page navigation like /ui/worker-setting)
+    const cookieToken = c.req.header('cookie')?.match(/(?:^|;\s*)TOKEN=([^;]+)/)?.[1];
+    if (cookieToken) token = cookieToken;
   }
   if (!token) return next();
 
