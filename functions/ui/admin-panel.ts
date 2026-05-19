@@ -611,6 +611,14 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     showPage('login');
   });
 
+  /* Sidebar nav item click handlers */
+  document.querySelectorAll('.nav-item[data-page]').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      navTo(el.dataset.page);
+    });
+  });
+
   function navTo(page) {
     document.querySelectorAll('.nav-item[data-page]').forEach(function(el){ el.classList.remove('active'); });
     var active = document.querySelector('.nav-item[data-page="' + page + '"]');
