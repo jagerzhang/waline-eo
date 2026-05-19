@@ -24,8 +24,10 @@ export const auth = createMiddleware<{
   }
   if (!token) {
     // Fallback: token stored in cookie (for page navigation like /ui/worker-setting)
-    const cookieToken = c.req.header('cookie')?.match(/(?:^|;\s*)TOKEN=([^;]+)/)?.[1];
-    if (cookieToken) token = cookieToken;
+    const rawCookieToken = c.req.header('cookie')?.match(/(?:^|;\s*)TOKEN=([^;]+)/)?.[1];
+    if (rawCookieToken) {
+      try { token = decodeURIComponent(rawCookieToken); } catch { token = rawCookieToken; }
+    }
   }
   if (!token) return next();
 

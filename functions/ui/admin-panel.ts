@@ -239,7 +239,17 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 (function(){
   // API 地址直接从浏览器 location.origin 获取，无需服务端注入
   var API = location.origin;
-  var token = localStorage.getItem('TOKEN') || sessionStorage.getItem('TOKEN');
+  // 优先从 localStorage 读 token，没有则尝试从 cookie 恢复（防止 localStorage 被清除但 cookie 仍有效）
+  function getTokenFromCookie() {
+    var m = document.cookie.match(/(?:^|;\s*)TOKEN=([^;]+)/);
+    if (!m) return null;
+    try { return decodeURIComponent(m[1]); } catch(e) { return m[1]; }
+  }
+  var token = localStorage.getItem('TOKEN') || sessionStorage.getItem('TOKEN') || getTokenFromCookie();
+  // 若从 cookie 恢复了 token，同步写回 localStorage 方便后续使用
+  if (token && !localStorage.getItem('TOKEN')) {
+    try { localStorage.setItem('TOKEN', token); } catch(e) {}
+  }
   var currentUser = null;
 
   // ===== API Helper =====
