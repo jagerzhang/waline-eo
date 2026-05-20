@@ -29,6 +29,8 @@ const ALLOWED_KEYS = new Set([
   'akismet_key',
   'disable_region',
   'disable_useragent',
+  // Content moderation
+  'forbidden_words',
   // SMTP
   'smtp_service',
   'smtp_host',

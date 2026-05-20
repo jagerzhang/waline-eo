@@ -306,11 +306,11 @@ userRoutes.delete('/:id', async (c) => {
     return c.json({ errno: 1, errmsg: 'User not found' }, 404);
   }
 
-  if ((target.type as string).startsWith('verify:') || target.type === 'guest') {
-    // Unverified or guest: hard delete
+  if ((target.type as string).startsWith('verify:')) {
+    // Unverified: hard delete
     await deleteUserById(id);
   } else {
-    // Verified: ban
+    // Verified, guest, or other: ban
     await updateUser(id, { type: 'banned' });
   }
 

@@ -20,8 +20,22 @@ import {
   getCommentCountsByUrls,
   searchComments,
   getUserCommentCount,
+  getMailCommentCount,
+  getUserById,
+  getStatusCommentCount,
   type KVComment,
 } from '../db/kv-store.js';
+
+// Simple string hash for dedup keys
+function simpleHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + ch;
+    hash |= 0;
+  }
+  return (hash >>> 0).toString(36);
+}
 
 export const commentRoutes = new Hono<{
   Bindings: Env;
@@ -155,6 +169,33 @@ commentRoutes.post('/', async (c) => {
 
   // Render markdown to HTML
   const renderedComment = renderMarkdown(comment);
+
+  // ForbiddenWords check: if content matches any forbidden keyword, mark as spam
+  if (!isAdmin) {
+    const forbiddenRaw = await getSetting('forbidden_words').catch(() => null);
+    if (forbiddenRaw) {
+      const words = forbiddenRaw.split(/[,\n]/).map((w: string) => w.trim()).filter(Boolean);
+      if (words.length > 0) {
+        const checkText = `${nick} ${mail} ${link} ${comment}`;
+        const matched = words.some((word: string) => checkText.toLowerCase().includes(word.toLowerCase()));
+        if (matched) {
+          status = 'spam';
+        }
+      }
+    }
+  }
+
+  // Duplicate content detection (skip for admin)
+  if (!isAdmin) {
+    const dedupContent = `${nick}:${mail}:${url}:${comment}`;
+    const dedupKey = `dedup:${simpleHash(dedupContent)}`;
+    const existing = await WALINE_KV.get(dedupKey);
+    if (existing) {
+      return c.json({ errno: 1, errmsg: '请勿重复提交相同评论' }, 400);
+    }
+    // Set dedup key with 10-minute expiry
+    await WALINE_KV.put(dedupKey, '1', { expirationTtl: 600 });
+  }
 
   const newComment = await createComment({
     user_id: userInfo?.objectId ?? null,
@@ -630,15 +671,27 @@ async function computeLevels(comments: any[]): Promise<Map<string, number>> {
   const levels = await getLevelsConfig();
   if (!levels) return levelMap;
 
-  // Collect unique user_ids
+  // Collect unique user_ids and mails for anonymous users
   const userIds = [...new Set(comments.map((c) => c.user_id).filter(Boolean))] as number[];
+  const anonMails = [...new Set(
+    comments.filter((c) => !c.user_id && c.mail).map((c) => c.mail as string),
+  )];
 
-  // Batch fetch comment counts for each user
-  const countMap = new Map<number, number>();
+  // Batch fetch comment counts for registered users
+  const userCountMap = new Map<number, number>();
   await Promise.all(
     userIds.map(async (uid) => {
       const count = await getUserCommentCount(uid);
-      countMap.set(uid, count);
+      userCountMap.set(uid, count);
+    }),
+  );
+
+  // Batch fetch comment counts for anonymous users (by mail)
+  const mailCountMap = new Map<string, number>();
+  await Promise.all(
+    anonMails.map(async (mail) => {
+      const count = await getMailCommentCount(mail);
+      mailCountMap.set(mail, count);
     }),
   );
 
@@ -646,7 +699,9 @@ async function computeLevels(comments: any[]): Promise<Map<string, number>> {
   for (const cmt of comments) {
     const key = cmt.user_id ? `uid:${cmt.user_id}` : `mail:${cmt.mail || ''}`;
     if (!levelMap.has(key)) {
-      const count = cmt.user_id ? (countMap.get(cmt.user_id) || 0) : 0;
+      const count = cmt.user_id
+        ? (userCountMap.get(cmt.user_id) || 0)
+        : (mailCountMap.get(cmt.mail || '') || 0);
       levelMap.set(key, getLevel(count, levels));
     }
   }
@@ -664,6 +719,7 @@ async function getCommentList(c: any) {
     return c.json({ errno: 1, errmsg: 'path is required' }, 400);
   }
 
+  const userInfo = c.get('userInfo');
   const page = Math.max(1, parseInt(c.req.query('page') || '1') || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt(c.req.query('pageSize') || '10') || 10));
   const sortBy = c.req.query('sortBy') || 'insertedAt_desc';
@@ -684,15 +740,49 @@ async function getCommentList(c: any) {
     status: 'approved',
   });
 
+  // If logged-in non-admin user, also fetch their own waiting root comments
+  let ownWaitingRoots: any[] = [];
+  if (userInfo && userInfo.type !== 'administrator' && userInfo.objectId) {
+    const { comments: waitingRoots } = await getRootCommentsByUrl(path, {
+      orderBy,
+      limit: 100,
+      offset: 0,
+      status: 'waiting',
+    });
+    ownWaitingRoots = waitingRoots.filter((c: any) => c.user_id === userInfo.objectId);
+  }
+
+  // Merge own waiting roots with approved roots (dedup by id)
+  const approvedIds = new Set(rootComments.map((r: any) => r.id));
+  const mergedRoots = [...rootComments, ...ownWaitingRoots.filter((r: any) => !approvedIds.has(r.id))];
+
   // Get child comments for these roots
-  const rootIds = rootComments.map((r: any) => r.id);
-  const children = await getChildCommentsByRids(rootIds, 'approved');
+  const rootIds = mergedRoots.map((r: any) => r.id);
+  let children = await getChildCommentsByRids(rootIds, 'approved');
+
+  // Also include own waiting children
+  if (userInfo && userInfo.type !== 'administrator' && userInfo.objectId) {
+    const waitingChildren = await getChildCommentsByRids(rootIds, 'waiting');
+    const ownWaitingChildren = waitingChildren.filter((c: any) => c.user_id === userInfo.objectId);
+    const approvedChildIds = new Set(children.map((c: any) => c.id));
+    children = [...children, ...ownWaitingChildren.filter((c: any) => !approvedChildIds.has(c.id))];
+  }
 
   // Build a lookup map for reply_user (all comments by id)
-  const allComments = [...rootComments, ...children];
+  const allComments = [...mergedRoots, ...children];
   const commentMap = new Map<number, any>();
   for (const cmt of allComments) {
     commentMap.set(cmt.id, cmt);
+  }
+
+  // Batch fetch user info for type/label inheritance
+  const userIds = [...new Set(allComments.map((c) => c.user_id).filter(Boolean))] as number[];
+  const usersMap = new Map<number, any>();
+  if (userIds.length > 0) {
+    const users = (await Promise.all(userIds.map((uid) => getUserById(uid)))).filter(Boolean);
+    for (const u of users) {
+      usersMap.set(u!.id as number, u);
+    }
   }
 
   // Compute levels in batch
@@ -700,14 +790,14 @@ async function getCommentList(c: any) {
 
   // Build threaded structure
   const data = await Promise.all(
-    rootComments.map(async (root: any) => {
+    mergedRoots.map(async (root: any) => {
       const rootChildren = children
         .filter((child: any) => child.rid === root.id);
       const formattedChildren = await Promise.all(
         rootChildren.map(async (child: any) => {
-          const formatted = await formatComment(child, false, c.env);
+          const formatted = await formatComment(child, false, c.env, usersMap);
           // Add reply_user: look up the parent comment by pid
-          if (child.pid && child.pid !== child.rid) {
+          if (child.pid) {
             const parent = commentMap.get(child.pid);
             if (parent) {
               (formatted as any).reply_user = {
@@ -721,7 +811,7 @@ async function getCommentList(c: any) {
           return formatted;
         }),
       );
-      const formattedRoot = await formatComment(root, false, c.env);
+      const formattedRoot = await formatComment(root, false, c.env, usersMap);
       (formattedRoot as any).level = levelMap.get(getLevelKey(root)) || 0;
       return {
         ...formattedRoot,
@@ -795,13 +885,17 @@ async function getAdminCommentList(c: any) {
     ownerEmail = userInfo.email;
   }
 
-  const { data, total } = await searchComments({
-    status: status || undefined,
-    keyword: keyword || undefined,
-    ownerEmail,
-    limit: pageSize,
-    offset,
-  });
+  const [{ data, total }, spamCount, waitingCount] = await Promise.all([
+    searchComments({
+      status: status || undefined,
+      keyword: keyword || undefined,
+      ownerEmail,
+      limit: pageSize,
+      offset,
+    }),
+    getStatusCommentCount('spam'),
+    getStatusCommentCount('waiting'),
+  ]);
 
   return c.json({
     errno: 0,
@@ -809,15 +903,15 @@ async function getAdminCommentList(c: any) {
     data: {
       page,
       pageSize,
-      spamCount: 0,
-      waitingCount: 0,
+      spamCount,
+      waitingCount,
       totalPages: Math.ceil(total / pageSize),
       data: await Promise.all(data.map((r: any) => formatComment(r, true, c.env))),
     },
   });
 }
 
-async function formatComment(row: any, isAdmin = false, env?: Env) {
+async function formatComment(row: any, isAdmin = false, env?: Env, usersMap?: Map<number, any>) {
   if (!row) return null;
   // Read KV settings with env fallback
   const [disableUARaw, authorEmailRaw] = await Promise.all([
@@ -827,13 +921,22 @@ async function formatComment(row: any, isAdmin = false, env?: Env) {
   const disableUA = (disableUARaw === 'true') || env?.DISABLE_USERAGENT === 'true';
   const authorEmail = (authorEmailRaw || env?.AUTHOR_EMAIL || '').toLowerCase().trim();
   const { browser, os } = disableUA ? { browser: '', os: '' } : parseUA(row.ua || '');
-  const avatar = await getAvatar(row.mail || '');
+
+  // Inherit nick/mail/link/type/label from Users table if user_id present
+  const user = row.user_id && usersMap ? usersMap.get(row.user_id) : null;
+  const nick = user?.display_name || row.nick || '';
+  const mail = user?.email || row.mail || '';
+  const link = user?.url || row.link || '';
+  const userType = user?.type || '';
+  const userLabel = user?.label || '';
+
+  const avatar = await getAvatar(mail);
   const result: Record<string, any> = {
     objectId: row.id,
     comment: row.comment || '',
     orig: row.orig || row.comment || '',
-    nick: row.nick || '',
-    link: row.link || '',
+    nick,
+    link,
     avatar,
     browser,
     os,
@@ -849,13 +952,21 @@ async function formatComment(row: any, isAdmin = false, env?: Env) {
     user_id: row.user_id,
   };
 
-  // Author email badge
-  if (authorEmail && row.mail && row.mail.toLowerCase() === authorEmail) {
+  // User type and label from Users table
+  if (userType) {
+    result.type = userType;
+  }
+  if (userLabel) {
+    result.label = userLabel;
+  }
+
+  // Author email badge (fallback if no custom label set)
+  if (!result.label && authorEmail && mail && mail.toLowerCase() === authorEmail) {
     result.label = '博主';
   }
 
   if (isAdmin) {
-    result.mail = row.mail || '';
+    result.mail = mail;
     result.ip = row.ip || '';
     result.ua = row.ua || '';
   }

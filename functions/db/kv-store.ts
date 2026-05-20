@@ -289,6 +289,17 @@ async function getStatusPages(status: string): Promise<number> {
   return (await getJson<number>(`meta:comments:status:${status}:pages`)) || 0;
 }
 
+export async function getStatusCommentCount(status: string): Promise<number> {
+  const pages = await getStatusPages(status);
+  if (pages === 0) return 0;
+  let total = 0;
+  for (let page = 0; page < pages; page++) {
+    const ids = await getStatusPageIds(status, page);
+    total += ids.length;
+  }
+  return total;
+}
+
 async function setStatusPages(status: string, pages: number): Promise<void> {
   await putJson(`meta:comments:status:${status}:pages`, pages);
 }
@@ -367,6 +378,20 @@ export async function getUserCommentCount(userId: number): Promise<number> {
   if (ids.length === 0) return 0;
   const comments = await getCommentsByIds(ids);
   return comments.filter((c) => c.status === 'approved').length;
+}
+
+export async function getMailCommentCount(mail: string): Promise<number> {
+  if (!mail) return 0;
+  const maxPages = 5;
+  const pages = await getStatusPages('approved');
+  const scanPages = Math.min(pages, maxPages);
+  let count = 0;
+  for (let page = 0; page < scanPages; page++) {
+    const ids = await getStatusPageIds('approved', page);
+    const comments = await getCommentsByIds(ids);
+    count += comments.filter((c) => c.mail === mail).length;
+  }
+  return count;
 }
 
 export async function createComment(data: Partial<KVComment>): Promise<KVComment> {
