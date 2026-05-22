@@ -686,7 +686,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       }
       html += '</div>';
       c.innerHTML = html;
-      c.addEventListener('click', function(e) {
+      if (c._userClickHandler) c.removeEventListener('click', c._userClickHandler);
+      c._userClickHandler = function(e) {
         var btn = e.target.closest('.user-action');
         if (btn) {
           var action=btn.dataset.action, id=btn.dataset.id, name=btn.dataset.name;
@@ -699,7 +700,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
         }
         var pageBtn = e.target.closest('.pe-page-btn[data-page]');
         if (pageBtn && c.querySelector('.user-action')) loadUsersPage(parseInt(pageBtn.dataset.page));
-      });
+      };
+      c.addEventListener('click', c._userClickHandler);
       c.querySelectorAll('img[data-fb]').forEach(function(img){
         img.addEventListener('error', function(){ this.src = this.dataset.fb; });
       });
@@ -810,7 +812,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       }
       html += '</div>';
       c.innerHTML = html;
-      c.addEventListener('click', function(e) {
+      if (c._cmtClickHandler) c.removeEventListener('click', c._cmtClickHandler);
+      c._cmtClickHandler = function(e) {
         var btn = e.target.closest('.cmt-action');
         if (btn) {
           var action=btn.dataset.action, id=btn.dataset.id;
@@ -820,7 +823,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
         }
         var pageBtn = e.target.closest('.pe-page-btn[data-page]');
         if (pageBtn && c.querySelector('.cmt-action')) loadCommentsPage(parseInt(pageBtn.dataset.page));
-      });
+      };
+      c.addEventListener('click', c._cmtClickHandler);
       var sf = c.querySelector('#cmtStatusFilter'), si = c.querySelector('#cmtKeywordInput'), sb = c.querySelector('#cmtSearchBtn');
       if (sf) sf.addEventListener('change', function(){ cmtStatus = this.value; loadCommentsPage(1); });
       if (sb && si) {
@@ -969,7 +973,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       });
 
       /* 社交绑定/解绑 + 2FA 事件委托 */
-      c.addEventListener('click', function(e) {
+      if (c._profileClickHandler) c.removeEventListener('click', c._profileClickHandler);
+      c._profileClickHandler = function(e) {
         /* 绑定 */
         var bindBtn = e.target.closest('[data-social-bind]');
         if (bindBtn) { oauthGo(bindBtn.dataset.socialBind, token || ''); return; }
@@ -995,7 +1000,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
             else toast(d.errmsg||'操作失败', false);
           }).catch(function(){ toast('请求失败', false); });
         }
-      });
+      };
+      c.addEventListener('click', c._profileClickHandler);
 
     }).catch(function(){ c.innerHTML = '<div class="loading-box" style="color:var(--pe-danger);">加载失败，请刷新重试</div>'; });
   }
