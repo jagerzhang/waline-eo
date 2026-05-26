@@ -888,7 +888,7 @@ const STATIC_TAIL = `;
       }
       currentUser = d.data;
       renderProfile(c, d.data);
-    });
+    }).catch(function(){ c.innerHTML = '<div class="loading-box" style="color:var(--pe-danger);">加载失败，请刷新重试</div>'; });
   }
   function renderProfile(c, u) {
       var avatar = u.avatar || 'https://cravatar.cn/avatar/?d=mp&s=80';
@@ -1024,8 +1024,6 @@ const STATIC_TAIL = `;
         }
       };
       c.addEventListener('click', c._profileClickHandler);
-
-    }).catch(function(){ c.innerHTML = '<div class="loading-box" style="color:var(--pe-danger);">加载失败，请刷新重试</div>'; });
   }
 
   /* ============ 2FA SETUP MODAL ============ */
