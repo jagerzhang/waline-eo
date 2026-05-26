@@ -20,7 +20,7 @@ export async function getAdminPage(env: Env, requestUrl: string): Promise<string
 <meta charset="utf-8">
 <title>Waline 管理后台</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/layui@2.13.5/dist/css/layui.css">
+<link rel="stylesheet" href="https://registry.npmmirror.com/layui/2.13.5/files/dist/css/layui.css">
 <style>
 :root {
   --pe-bg-base: #EEF1F6;
@@ -381,7 +381,6 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
   if (oe) { window.__oauthError = oe; }
 })();
 </script>
-<script src="https://cdn.jsdelivr.net/npm/layui@2.13.5/dist/layui.js"></script>
 <script>
 (function(){
   'use strict';
@@ -1189,6 +1188,14 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 
   /* ============ START ============ */
   init();
+  // Safety timeout: if init hasn't hidden the page loading after 15s, force hide it
+  setTimeout(function() {
+    var pl = document.getElementById('pageLoading');
+    if (pl && pl.style.display !== 'none') {
+      hidePageLoading();
+      if (!currentUser) showPage('login');
+    }
+  }, 15000);
 })();
 </script>
 </body>
