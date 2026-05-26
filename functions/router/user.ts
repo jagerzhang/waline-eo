@@ -91,6 +91,17 @@ userRoutes.post('/', async (c) => {
     return c.json({ errno: 1, errmsg: 'email and password are required' }, 400);
   }
 
+  // Rate limit registration: 1 attempt per IP per 60 seconds
+  const regIp = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || '';
+  if (regIp) {
+    const regKey = `reg_limit:${regIp}`;
+    const recent = await WALINE_KV.get(regKey);
+    if (recent) {
+      return c.json({ errno: 1, errmsg: '注册太频繁，请稍后再试' }, 429);
+    }
+    await WALINE_KV.put(regKey, '1', { expirationTtl: 60 });
+  }
+
   // Check if email exists (allow re-registration of unverified users)
   const existing = await getUserByEmail(email);
 

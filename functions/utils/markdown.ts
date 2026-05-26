@@ -11,12 +11,19 @@ export function renderMarkdown(text: string): string {
 
   // Preserve safe <img> tags before HTML escaping (emoji support)
   // @waline/client sends emojis as: <img class="wl-emoji" src="//unpkg.com/..." alt="name">
+  // SECURITY: Only keep src, alt, class, loading attributes; strip everything else (onerror, onload, etc.)
   const imgPlaceholders: string[] = [];
   html = html.replace(/<img\s+[^>]*src=["']([^"']+)["'][^>]*\/?>/gi, (match, src) => {
     // Allow protocol-relative URLs and https from any source (user-uploaded images, CDNs)
     if (/^(\/\/|https?:\/\/)/.test(src)) {
+      // Extract only safe attributes
+      const altMatch = match.match(/alt=["']([^"']*)["']/i);
+      const classMatch = match.match(/class=["']([^"']*)["']/i);
+      const alt = altMatch ? ` alt="${altMatch[1]}"` : '';
+      const cls = classMatch ? ` class="${classMatch[1]}"` : '';
+      const safeImg = `<img src="${src}"${cls}${alt} loading="lazy" />`;
       const idx = imgPlaceholders.length;
-      imgPlaceholders.push(match);
+      imgPlaceholders.push(safeImg);
       return `__IMG_PLACEHOLDER_${idx}__`;
     }
     return match;

@@ -119,9 +119,7 @@ async function uploadToKV(file: File, requestUrl: string): Promise<string> {
   const key = `${ts}-${rand}`;
 
   // Store as "mime:base64"
-  await WALINE_KV.put(`img:${key}`, `${file.type}:${b64}`, {
-    expirationTtl: 60 * 60 * 24 * 365, // 1 year
-  });
+  await WALINE_KV.put(`img:${key}`, `${file.type}:${b64}`);
 
   const origin = new URL(requestUrl).origin;
   return `${origin}/api/image/${key}`;

@@ -428,7 +428,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 
   /* ---------- XSS escape ---------- */
   function esc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
   /* ---------- 页面加载遮罩 ---------- */

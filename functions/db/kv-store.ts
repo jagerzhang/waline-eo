@@ -66,10 +66,10 @@ export interface KVCounter {
 // ---------- Helpers ----------
 
 function nowIso(): string {
-  // Match D1 datetime('now') format: YYYY-MM-DD HH:MM:SS
+  // Match D1 datetime('now') format: YYYY-MM-DD HH:MM:SS (UTC)
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 }
 
 async function getJson<T>(key: string): Promise<T | null> {
@@ -123,8 +123,12 @@ function listKeyName(k: any): string {
 }
 
 async function getNextId(metaKey: string): Promise<number> {
+  // Mitigate race condition: add random offset to reduce collision probability
+  // under concurrent requests. KV lacks atomic increment, so this is best-effort.
   const current = await WALINE_KV.get(metaKey);
-  const id = current ? parseInt(current) : 1;
+  const base = current ? parseInt(current) : 1;
+  const randomOffset = Math.floor(Math.random() * 4); // 0-3 extra to avoid same ID
+  const id = base + randomOffset;
   await WALINE_KV.put(metaKey, String(id + 1));
   return id;
 }
@@ -382,11 +386,9 @@ export async function getUserCommentCount(userId: number): Promise<number> {
 
 export async function getMailCommentCount(mail: string): Promise<number> {
   if (!mail) return 0;
-  const maxPages = 5;
   const pages = await getStatusPages('approved');
-  const scanPages = Math.min(pages, maxPages);
   let count = 0;
-  for (let page = 0; page < scanPages; page++) {
+  for (let page = 0; page < pages; page++) {
     const ids = await getStatusPageIds('approved', page);
     const comments = await getCommentsByIds(ids);
     count += comments.filter((c) => c.mail === mail).length;
@@ -662,12 +664,10 @@ export async function searchComments(
   },
 ): Promise<{ data: KVComment[]; total: number }> {
   const status = options.status || 'approved';
-  const maxScanPages = 5;
   const pages = await getStatusPages(status);
-  const scanPages = Math.min(pages, maxScanPages);
 
   const allComments: KVComment[] = [];
-  for (let page = 0; page < scanPages; page++) {
+  for (let page = 0; page < pages; page++) {
     const ids = await getStatusPageIds(status, page);
     const comments = await getCommentsByIds(ids);
     allComments.push(...comments);
@@ -688,11 +688,9 @@ export async function searchComments(
 }
 
 export async function getAllComments(): Promise<KVComment[]> {
-  const maxPages = 5;
   const pages = await getStatusPages('approved');
-  const scanPages = Math.min(pages, maxPages);
   const allComments: KVComment[] = [];
-  for (let page = 0; page < scanPages; page++) {
+  for (let page = 0; page < pages; page++) {
     const ids = await getStatusPageIds('approved', page);
     const comments = await getCommentsByIds(ids);
     allComments.push(...comments);
@@ -712,14 +710,19 @@ export async function clearComments(): Promise<void> {
   ];
 
   for (const prefix of prefixes) {
-    const list = await WALINE_KV.list({ prefix });
-    if (list && list.keys) {
-      const keys = list.keys.map((k) => listKeyName(k));
-      // EdgeOne KV may have rate limits on deletes; batch in chunks of 50
-      for (let i = 0; i < keys.length; i += 50) {
-        await Promise.all(keys.slice(i, i + 50).map((k) => WALINE_KV.delete(k)));
+    let cursor: string | undefined;
+    do {
+      const listOpts: any = { prefix };
+      if (cursor) listOpts.cursor = cursor;
+      const list = await WALINE_KV.list(listOpts);
+      if (list && list.keys && list.keys.length > 0) {
+        const keys = list.keys.map((k) => listKeyName(k));
+        for (let i = 0; i < keys.length; i += 50) {
+          await Promise.all(keys.slice(i, i + 50).map((k) => WALINE_KV.delete(k)));
+        }
       }
-    }
+      cursor = list?.cursor || undefined;
+    } while (cursor);
   }
 
   await WALINE_KV.delete('index:comments:recent');

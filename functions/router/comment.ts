@@ -214,7 +214,7 @@ commentRoutes.post('/', async (c) => {
 
   // Record IP last comment timestamp for IPQPS
   if (ipqps > 0 && ip) {
-    await WALINE_KV.put(`ipqps:${ip}`, String(Math.floor(Date.now() / 1000)));
+    await WALINE_KV.put(`ipqps:${ip}`, String(Math.floor(Date.now() / 1000)), { expirationTtl: Math.max(60, ipqps * 2) });
   }
 
   // ---- Notifications (async, non-blocking) ----
@@ -363,12 +363,20 @@ commentRoutes.put('/:id', async (c) => {
   const body = await c.req.json();
   const isAdmin = userInfo?.type === 'administrator';
 
-  // Like action (anyone can like - increment by 1)
+  // Like action (anyone can like - increment by 1, rate-limited per IP)
   if (body.like !== undefined && typeof body.like === 'boolean') {
     const existing = await getCommentById(id);
     if (!existing) {
       return c.json({ errno: 1, errmsg: 'Comment not found' }, 404);
     }
+    // Rate limit: one like per IP per comment per 60 seconds
+    const likeIp = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+    const likeKey = `like:${id}:${likeIp}`;
+    const likeRecent = await WALINE_KV.get(likeKey);
+    if (likeRecent) {
+      return c.json({ errno: 1, errmsg: '操作太频繁，请稍后再试' }, 429);
+    }
+    await WALINE_KV.put(likeKey, '1', { expirationTtl: 60 });
     const updated = await updateComment(id, {
       like: Math.max(0, (existing.like || 0) + 1),
     });
@@ -788,6 +796,9 @@ async function getCommentList(c: any) {
   // Compute levels in batch
   const levelMap = await computeLevels(allComments);
 
+  // Pre-fetch settings once for batch formatting
+  const fmtSettings = await fetchFormatSettings(c.env);
+
   // Build threaded structure
   const data = await Promise.all(
     mergedRoots.map(async (root: any) => {
@@ -795,7 +806,7 @@ async function getCommentList(c: any) {
         .filter((child: any) => child.rid === root.id);
       const formattedChildren = await Promise.all(
         rootChildren.map(async (child: any) => {
-          const formatted = await formatComment(child, false, c.env, usersMap);
+          const formatted = await formatComment(child, false, c.env, usersMap, fmtSettings);
           // Add reply_user: look up the parent comment by pid
           if (child.pid) {
             const parent = commentMap.get(child.pid);
@@ -816,7 +827,7 @@ async function getCommentList(c: any) {
           return formatted;
         }),
       );
-      const formattedRoot = await formatComment(root, false, c.env, usersMap);
+      const formattedRoot = await formatComment(root, false, c.env, usersMap, fmtSettings);
       (formattedRoot as any).level = levelMap.get(getLevelKey(root)) || 0;
       return {
         ...formattedRoot,
@@ -841,11 +852,12 @@ async function getCommentList(c: any) {
 async function getRecentCommentsHandler(c: any) {
   const count = Math.min(50, Math.max(1, parseInt(c.req.query('count') || '10') || 10));
   const comments = await getRecentComments(count);
+  const fmtSettings = await fetchFormatSettings(c.env);
 
   return c.json({
     errno: 0,
     errmsg: '',
-    data: await Promise.all(comments.map((r: any) => formatComment(r, false, c.env))),
+    data: await Promise.all(comments.map((r: any) => formatComment(r, false, c.env, undefined, fmtSettings))),
   });
 }
 
@@ -902,6 +914,8 @@ async function getAdminCommentList(c: any) {
     getStatusCommentCount('waiting'),
   ]);
 
+  const fmtSettings = await fetchFormatSettings(c.env);
+
   return c.json({
     errno: 0,
     errmsg: '',
@@ -911,20 +925,26 @@ async function getAdminCommentList(c: any) {
       spamCount,
       waitingCount,
       totalPages: Math.ceil(total / pageSize),
-      data: await Promise.all(data.map((r: any) => formatComment(r, true, c.env))),
+      data: await Promise.all(data.map((r: any) => formatComment(r, true, c.env, undefined, fmtSettings))),
     },
   });
 }
 
-async function formatComment(row: any, isAdmin = false, env?: Env, usersMap?: Map<number, any>) {
-  if (!row) return null;
-  // Read KV settings with env fallback
+async function fetchFormatSettings(env?: Env): Promise<{ disableUA: boolean; authorEmail: string }> {
   const [disableUARaw, authorEmailRaw] = await Promise.all([
     getSetting('disable_useragent').catch(() => null),
     getSetting('author_email').catch(() => null),
   ]);
-  const disableUA = (disableUARaw === 'true') || env?.DISABLE_USERAGENT === 'true';
-  const authorEmail = (authorEmailRaw || env?.AUTHOR_EMAIL || '').toLowerCase().trim();
+  return {
+    disableUA: (disableUARaw === 'true') || env?.DISABLE_USERAGENT === 'true',
+    authorEmail: (authorEmailRaw || env?.AUTHOR_EMAIL || '').toLowerCase().trim(),
+  };
+}
+
+async function formatComment(row: any, isAdmin = false, env?: Env, usersMap?: Map<number, any>, settings?: { disableUA: boolean; authorEmail: string }) {
+  if (!row) return null;
+  // Use pre-fetched settings if provided, otherwise read from KV
+  const { disableUA, authorEmail } = settings || await fetchFormatSettings(env);
   const { browser, os } = disableUA ? { browser: '', os: '' } : parseUA(row.ua || '');
 
   // Inherit nick/mail/link/type/label from Users table if user_id present
@@ -1013,7 +1033,7 @@ function buildRssXml({ title, link, description, items }: {
       <link>${escapeXml(item.link)}</link>
       <guid>${escapeXml(item.guid)}</guid>
       <pubDate>${item.pubDate}</pubDate>
-      <description><![CDATA[${item.description}]]></description>
+      <description><![CDATA[${item.description.replace(/]]>/g, ']]]]><![CDATA[>')}]]></description>
     </item>`,
     )
     .join('\n');
