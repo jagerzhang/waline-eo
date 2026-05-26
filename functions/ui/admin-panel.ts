@@ -482,8 +482,13 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
   }
 
   /* ---------- Popup 检测（@waline/client 登录弹窗） ---------- */
+  // 仅当 URL 路径为 /ui/login（Waline 客户端打开的登录弹窗）时才视作 popup。
+  // 注意：用户从博客点击头像跳转 /ui/profile?token=... 时也有 window.opener，但不应被关闭。
   function isPopup() {
-    try { return !!window.opener && !window.opener.closed; } catch(e) { return false; }
+    try {
+      if (!window.opener || window.opener.closed) return false;
+      return /^\/ui\/login\/?$/.test(location.pathname);
+    } catch(e) { return false; }
   }
   function sendPopupResult(data) {
     try { window.opener.postMessage({ type: 'userInfo', data: data }, '*'); } catch(e) {}
