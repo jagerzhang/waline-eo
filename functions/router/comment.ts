@@ -800,10 +800,15 @@ async function getCommentList(c: any) {
           if (child.pid) {
             const parent = commentMap.get(child.pid);
             if (parent) {
+              // Inherit from Users table first, fall back to raw comment row
+              const parentUser = parent.user_id && usersMap ? usersMap.get(parent.user_id) : null;
+              const parentNick = parentUser?.display_name || parent.nick || '';
+              const parentMail = parentUser?.email || parent.mail || '';
+              const parentLink = parentUser?.url || parent.link || '';
               (formatted as any).reply_user = {
-                nick: parent.nick || '',
-                link: parent.link || '',
-                avatar: await getAvatar(parent.mail || ''),
+                nick: parentNick,
+                link: parentLink,
+                avatar: await getAvatar(parentMail),
               };
             }
           }

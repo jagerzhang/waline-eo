@@ -481,6 +481,15 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     location.href = '/api/oauth?type=' + type + '&redirect=' + redirect + (state ? '&state=' + state : '');
   }
 
+  /* ---------- Popup 检测（@waline/client 登录弹窗） ---------- */
+  function isPopup() {
+    try { return !!window.opener && !window.opener.closed; } catch(e) { return false; }
+  }
+  function sendPopupResult(data) {
+    try { window.opener.postMessage({ type: 'userInfo', data: data }, '*'); } catch(e) {}
+    window.close();
+  }
+
   /* ============ INIT ============ */
   function init() {
     if (window.__oauthError) {
@@ -500,6 +509,9 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       hidePageLoading();
       if (d.errno === 0 && d.data) {
         currentUser = d.data;
+        // 如果是 Waline 客户端的登录弹窗，发送 postMessage 并关闭
+        // @waline/client 要求 data 中必须包含 token 字段，GET /api/token 不返回 token，需手动注入
+        if (isPopup()) { d.data.token = token; sendPopupResult(d.data); return; }
         showPage('admin');
         updateSidebar();
         navTo(currentUser.type === 'administrator' ? 'users' : 'profile');
@@ -558,6 +570,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
         localStorage.setItem('TOKEN', token);
         document.cookie = 'TOKEN=' + encodeURIComponent(token) + ';path=/;max-age=2592000;SameSite=Lax;Secure';
         currentUser = d.data;
+        // 如果是 Waline 客户端的登录弹窗，发送 postMessage 并关闭
+        if (isPopup()) { sendPopupResult(d.data); return; }
         showPage('admin'); updateSidebar();
         navTo(currentUser.type === 'administrator' ? 'users' : 'profile');
       } else if (d.data && d.data['2fa']) {
