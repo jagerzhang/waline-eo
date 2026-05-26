@@ -385,7 +385,7 @@ const STATIC_TAIL = `;
 
   /* ---------- token 恢复 ---------- */
   function cookieToken() {
-    var m = document.cookie.match(/(?:^|;\s*)TOKEN=([^;]+)/);
+    var m = document.cookie.match(/(?:^|;\\s*)TOKEN=([^;]+)/);
     if (!m) return null;
     try { return decodeURIComponent(m[1]); } catch(e) { return m[1]; }
   }
@@ -483,7 +483,7 @@ const STATIC_TAIL = `;
   function isPopup() {
     try {
       if (!window.opener || window.opener.closed) return false;
-      return /^\/ui\/login\/?$/.test(location.pathname);
+      return /^\\/ui\\/login\\/?$/.test(location.pathname);
     } catch(e) { return false; }
   }
   function sendPopupResult(data) {
