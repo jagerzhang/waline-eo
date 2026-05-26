@@ -7,14 +7,7 @@
  */
 import type { Env } from '../env.js';
 
-export async function getAdminPage(env: Env, requestUrl: string): Promise<string> {
-  const url = new URL(requestUrl);
-  // 兼容旧版 @waline/admin 的 /ui/profile?token=... 跳转
-  const urlToken = url.searchParams.get('token') || '';
-  // OAuth 回调错误参数
-  const oauthError = url.searchParams.get('error') || '';
-
-  return `<!doctype html>
+const STATIC_HEAD = `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -368,8 +361,12 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 <!-- 兼容旧版 @waline/admin /ui/profile?token=... 跳转拦截 -->
 <script>
 (function(){
-  var t = ${JSON.stringify(urlToken)};
-  var oe = ${JSON.stringify(oauthError)};
+  var t = `;
+
+const STATIC_MID = `;
+  var oe = `;
+
+const STATIC_TAIL = `;
   if (t) {
     try {
       localStorage.setItem('TOKEN', t);
@@ -878,15 +875,22 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     { key:'facebook', label:'Facebook', color:'#1877F2' },
   ];
 
-  function loadProfilePage() {
+  function loadProfilePage(forceRefresh) {
     var c = document.getElementById('adminContent');
+    if (!forceRefresh && currentUser) {
+      renderProfile(c, currentUser);
+      return;
+    }
     c.innerHTML = '<div class="loading-box"><i class="layui-icon layui-icon-loading layui-anim layui-anim-rotate layui-anim-loop"></i> 加载中...</div>';
     api('/token').then(function(d) {
       if (d.errno !== 0 || !d.data) {
         c.innerHTML = '<div class="loading-box" style="color:var(--pe-danger);">获取用户信息失败</div>'; return;
       }
       currentUser = d.data;
-      var u = d.data;
+      renderProfile(c, d.data);
+    });
+  }
+  function renderProfile(c, u) {
       var avatar = u.avatar || 'https://cravatar.cn/avatar/?d=mp&s=80';
 
       var html = '<div class="content-header"><h2>个人资料</h2><p>管理你的账号信息、安全设置与社交账号绑定</p></div>';
@@ -1003,7 +1007,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
           if (!confirm('确定解绑 ' + t2 + ' 账号？')) return;
           var body = {}; body[t2] = '';
           api('/user/' + u.objectId, { method: 'PUT', body: JSON.stringify(body) }).then(function(d) {
-            if (d.errno === 0) { toast('已解绑'); loadProfilePage(); }
+            if (d.errno === 0) { toast('已解绑'); loadProfilePage(true); }
             else toast(d.errmsg||'解绑失败', false);
           }).catch(function(){ toast('请求失败', false); });
           return;
@@ -1014,7 +1018,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
         if (e.target.closest('#disable2faBtn')) {
           if (!confirm('确定关闭两步验证？关闭后账号安全性将降低。')) return;
           api('/user/' + u.objectId, { method: 'PUT', body: JSON.stringify({ '2fa': '' }) }).then(function(d) {
-            if (d.errno === 0) { toast('两步验证已关闭'); loadProfilePage(); }
+            if (d.errno === 0) { toast('两步验证已关闭'); loadProfilePage(true); }
             else toast(d.errmsg||'操作失败', false);
           }).catch(function(){ toast('请求失败', false); });
         }
@@ -1049,7 +1053,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       var code = mask.querySelector('#tfaCode').value.trim();
       if (!code || code.length !== 6) { toast('请输入6位验证码', false); return; }
       api('/token/2fa', { method: 'POST', body: JSON.stringify({ secret: secret, code: code }) }).then(function(d) {
-        if (d.errno === 0) { toast('两步验证已开启'); mask.remove(); loadProfilePage(); }
+        if (d.errno === 0) { toast('两步验证已开启'); mask.remove(); loadProfilePage(true); }
         else toast(d.errmsg||'验证码错误，请重试', false);
       }).catch(function(){ toast('请求失败', false); });
     });
@@ -1200,4 +1204,13 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 </script>
 </body>
 </html>`;
+
+export async function getAdminPage(env: Env, requestUrl: string): Promise<string> {
+  const url = new URL(requestUrl);
+  const urlToken = url.searchParams.get('token') || '';
+  const oauthError = url.searchParams.get('error') || '';
+  return STATIC_HEAD + JSON.stringify(urlToken) + STATIC_MID + JSON.stringify(oauthError) + STATIC_TAIL;
 }
+
+/** Fingerprint for ETag — only valid when no dynamic params */
+export const ADMIN_ETAG = `"admin-${STATIC_HEAD.length + STATIC_MID.length + STATIC_TAIL.length}"`;

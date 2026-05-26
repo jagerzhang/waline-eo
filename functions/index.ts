@@ -12,7 +12,7 @@ import { dbRoutes } from './router/db.js';
 import { imageRoutes } from './router/image.js';
 import { verificationRoutes } from './router/verification.js';
 import { getWalinePage } from './ui/waline-page.js';
-import { getAdminPage } from './ui/admin-panel.js';
+import { getAdminPage, ADMIN_ETAG } from './ui/admin-panel.js';
 import { getCustomSettingsPage, get404Page } from './ui/custom-admin.js';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -77,10 +77,32 @@ app.get('/ui/worker-setting', async (c) => {
 
 // Admin panel UI (original @waline/admin from CDN)
 app.get('/ui', async (c) => {
-  return c.html(await getAdminPage(c.env, c.req.url));
+  const url = new URL(c.req.url);
+  const hasDynamic = url.searchParams.has('token') || url.searchParams.has('error');
+  if (!hasDynamic && c.req.header('If-None-Match') === ADMIN_ETAG) {
+    return new Response(null, { status: 304 });
+  }
+  const html = await getAdminPage(c.env, c.req.url);
+  const headers: Record<string, string> = { 'Content-Type': 'text/html; charset=utf-8' };
+  if (!hasDynamic) {
+    headers['ETag'] = ADMIN_ETAG;
+    headers['Cache-Control'] = 'private, max-age=0, must-revalidate';
+  }
+  return c.html(html, 200, headers);
 });
 app.get('/ui/*', async (c) => {
-  return c.html(await getAdminPage(c.env, c.req.url));
+  const url = new URL(c.req.url);
+  const hasDynamic = url.searchParams.has('token') || url.searchParams.has('error');
+  if (!hasDynamic && c.req.header('If-None-Match') === ADMIN_ETAG) {
+    return new Response(null, { status: 304 });
+  }
+  const html = await getAdminPage(c.env, c.req.url);
+  const headers: Record<string, string> = { 'Content-Type': 'text/html; charset=utf-8' };
+  if (!hasDynamic) {
+    headers['ETag'] = ADMIN_ETAG;
+    headers['Cache-Control'] = 'private, max-age=0, must-revalidate';
+  }
+  return c.html(html, 200, headers);
 });
 
 // Waline frontend UI (root page)

@@ -21,6 +21,12 @@ tokenRoutes.get('/', async (c) => {
     return c.json({ errno: 1, errmsg: 'Unauthorized' }, 401);
   }
 
+  const emailLower = userInfo.email.toLowerCase();
+  const [avatar, mailMd5] = await Promise.all([
+    userInfo.avatar || getAvatar(userInfo.email),
+    md5(emailLower),
+  ]);
+
   return c.json({
     errno: 0,
     errmsg: '',
@@ -30,7 +36,7 @@ tokenRoutes.get('/', async (c) => {
       email: userInfo.email,
       type: userInfo.type,
       url: userInfo.url,
-      avatar: userInfo.avatar || await getAvatar(userInfo.email),
+      avatar,
       label: userInfo.label || '',
       github: userInfo.github,
       twitter: userInfo.twitter,
@@ -39,7 +45,7 @@ tokenRoutes.get('/', async (c) => {
       weibo: userInfo.weibo,
       qq: userInfo.qq,
       '2fa': userInfo['2fa'] ? true : undefined,
-      mailMd5: await md5(userInfo.email.toLowerCase()),
+      mailMd5,
     },
   });
 });
@@ -88,6 +94,12 @@ tokenRoutes.post('/', async (c) => {
 
   const token = await signJwt({ id: user.id as number }, jwtSecret);
 
+  const userEmail = (user.email as string).toLowerCase();
+  const [avatar, mailMd5] = await Promise.all([
+    (user.avatar as string) || getAvatar(user.email as string),
+    md5(userEmail),
+  ]);
+
   return c.json({
     errno: 0,
     errmsg: '',
@@ -98,9 +110,9 @@ tokenRoutes.post('/', async (c) => {
       email: user.email,
       type: user.type,
       url: user.url || '',
-      avatar: (user.avatar as string) || await getAvatar(user.email as string),
+      avatar,
       label: user.label || '',
-      mailMd5: await md5((user.email as string).toLowerCase()),
+      mailMd5,
     },
   });
 });

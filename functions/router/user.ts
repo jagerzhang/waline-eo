@@ -46,9 +46,10 @@ userRoutes.get('/', async (c) => {
     const pageSize = Math.min(100, Math.max(1, parseInt(c.req.query('pageSize') || '10') || 10));
     const offset = (page - 1) * pageSize;
 
-    const total = await getUserCount();
-
-    const { data } = await getUsers({ limit: pageSize, offset });
+    const [total, { data }] = await Promise.all([
+      getUserCount(),
+      getUsers({ limit: pageSize, offset }),
+    ]);
 
     return c.json({
       errno: 0,
