@@ -150,7 +150,7 @@ userRoutes.post('/', async (c) => {
   // If verification needed, send email
   if (!isFirst && hasMailService) {
     const siteName = cfg('site_name') || 'Waline';
-    const serverUrl = (cfg('site_url') || new URL(c.req.url).origin).replace(/\/$/, '');
+    const serverUrl = (cfg('site_url').replace(/^["']|["']$/g, '') || new URL(c.req.url).origin).replace(/\/$/, '');
     const verifyUrl = `${serverUrl}/api/verification?token=${token}&email=${encodeURIComponent(email)}`;
     const safeVerifyUrl = escapeHtmlEmail(verifyUrl);
 
@@ -224,7 +224,7 @@ userRoutes.put('/password', async (c) => {
 
   // Generate a short-lived token (1 hour)
   const token = await signJwt({ id: user.id as number }, jwtSecret, 3600);
-  const siteUrl = cfg('site_url') || '';
+  const siteUrl = cfg('site_url').replace(/^["']|["']$/g, '') || '';
   const siteName = cfg('site_name') || 'Waline';
   const serverUrl = siteUrl ? siteUrl.replace(/\/$/, '') : new URL(c.req.url).origin;
   const profileUrl = `${serverUrl}/ui/profile?token=${token}`;

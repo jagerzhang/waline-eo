@@ -124,6 +124,16 @@ app.get('/', (c) => {
   return c.html(getWalinePage());
 });
 
+// Fallback: catch any unmatched /ui routes (safety net for platform routing quirks)
+app.notFound(async (c) => {
+  const pathname = new URL(c.req.url).pathname;
+  if (pathname === '/ui' || pathname.startsWith('/ui/')) {
+    const html = await getAdminPage(c.env, c.req.url);
+    return c.html(html);
+  }
+  return c.json({ errno: 1, errmsg: 'Not Found' }, 404);
+});
+
 export function onRequest(context: {
   request: Request;
   params: Record<string, string>;
