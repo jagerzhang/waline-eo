@@ -361,10 +361,10 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
 <!-- 兼容旧版 @waline/admin /ui/profile?token=... 跳转拦截 -->
 <script>
 (function(){
-  var t = `;
+  var t = ;
 
 const STATIC_MID = `;
-  var oe = `;
+  var oe = ;
 
 const STATIC_TAIL = `;
   if (t) {

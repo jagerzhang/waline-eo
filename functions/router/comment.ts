@@ -570,10 +570,15 @@ commentRoutes.get('/rss', async (c) => {
 
   if (path) {
     // Filter by page path
-    const rootComments = await getRootCommentsByUrl(path, 'approved', 1, 100);
-    const rootIds = rootComments.data.map((c: KVComment) => c.id as number);
+    const { comments: rootComments } = await getRootCommentsByUrl(path, {
+      orderBy: 'insertedAt DESC',
+      limit: 100,
+      offset: 0,
+      status: 'approved',
+    });
+    const rootIds = rootComments.map((c: KVComment) => c.id as number);
     const childComments = rootIds.length > 0 ? await getChildCommentsByRids(rootIds, 'approved') : [];
-    comments = [...rootComments.data, ...childComments]
+    comments = [...rootComments, ...childComments]
       .sort((a, b) => b.insertedAt.localeCompare(a.insertedAt))
       .slice(0, limit);
   } else if (email || userId) {
