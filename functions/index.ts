@@ -90,6 +90,20 @@ app.get('/ui', async (c) => {
   }
   return c.html(html, 200, headers);
 });
+app.get('/ui/', async (c) => {
+  const url = new URL(c.req.url);
+  const hasDynamic = url.searchParams.has('token') || url.searchParams.has('error');
+  if (!hasDynamic && c.req.header('If-None-Match') === ADMIN_ETAG) {
+    return new Response(null, { status: 304 });
+  }
+  const html = await getAdminPage(c.env, c.req.url);
+  const headers: Record<string, string> = { 'Content-Type': 'text/html; charset=utf-8' };
+  if (!hasDynamic) {
+    headers['ETag'] = ADMIN_ETAG;
+    headers['Cache-Control'] = 'private, max-age=0, must-revalidate';
+  }
+  return c.html(html, 200, headers);
+});
 app.get('/ui/*', async (c) => {
   const url = new URL(c.req.url);
   const hasDynamic = url.searchParams.has('token') || url.searchParams.has('error');
