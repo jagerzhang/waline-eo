@@ -1,0 +1,10 @@
+{
+  "name": "waline-oe",
+  "version": "1.0.0",
+  "bindings": [
+    {
+      "type": "kv",
+      "name": "WALINE_KV"
+    }
+  ]
+}
