@@ -386,6 +386,9 @@ commentRoutes.put('/:id', async (c) => {
     const updated = await updateComment(id, {
       like: Math.max(0, (existing.like || 0) + 1),
     });
+    if (!updated) {
+      return c.json({ errno: 1, errmsg: 'Comment not found' }, 404);
+    }
     return c.json({ errno: 0, errmsg: '', data: await formatComment(updated, false, c.env) });
   }
 

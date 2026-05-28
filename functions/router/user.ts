@@ -139,11 +139,12 @@ userRoutes.post('/', async (c) => {
     url: url || '',
   };
 
+  let newUser;
   if (existing) {
     // Re-register unverified user
-    await updateUser(existing.id as number, userData);
+    newUser = await updateUser(existing.id as number, userData);
   } else {
-    await createUser(userData);
+    newUser = await createUser(userData);
   }
 
   // If verification needed, send email
@@ -177,10 +178,6 @@ userRoutes.post('/', async (c) => {
 
     return c.json({ errno: 0, errmsg: '', data: { verify: true } }, 201);
   }
-
-  const newUser = existing
-    ? await getUserByEmail(email)
-    : await getUserByEmail(email);
 
   return c.json({
     errno: 0,
