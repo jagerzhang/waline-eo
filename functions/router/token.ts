@@ -112,6 +112,7 @@ tokenRoutes.post('/', async (c) => {
       url: user.url || '',
       avatar,
       label: user.label || '',
+      '2fa': user['2fa'] ? true : false,
       mailMd5,
     },
   });

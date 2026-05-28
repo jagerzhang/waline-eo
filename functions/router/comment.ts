@@ -23,6 +23,7 @@ import {
   getMailCommentCount,
   getUserById,
   getStatusCommentCount,
+  getAllComments,
   type KVComment,
 } from '../db/kv-store.js';
 
@@ -35,6 +36,10 @@ function simpleHash(str: string): string {
     hash |= 0;
   }
   return (hash >>> 0).toString(36);
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 export const commentRoutes = new Hono<{
@@ -131,8 +136,9 @@ commentRoutes.post('/', async (c) => {
   // IPQPS rate limit (skip for administrators)
   const ipqpsRaw = (await getSetting('ipqps').catch(() => null)) || c.env.IPQPS;
   const ipqps = ipqpsRaw ? parseInt(String(ipqpsRaw)) : 60;
-  if (!isAdmin && ipqps > 0 && ip) {
-    const lastKey = `ipqps:${ip}`;
+  if (!isAdmin && ipqps > 0) {
+    const rateKey = ip || `noip:${body.mail || body.nick || 'anon'}`;
+    const lastKey = `ipqps:${rateKey}`;
     const lastStr = await WALINE_KV.get(lastKey);
     const lastTime = lastStr ? parseInt(lastStr) : 0;
     const nowSec = Math.floor(Date.now() / 1000);
@@ -323,9 +329,9 @@ commentRoutes.post('/', async (c) => {
             ? `${siteName} - 评论回复`
             : `${siteName} - 新评论`;
           const ppContent = [
-            `<b>评论者：</b>${newComment.nick || '匿名'}（${newComment.mail || '无邮箱'}）`,
-            `<b>页面：</b>${newComment.url || ''}`,
-            `<b>内容：</b><br>${newComment.comment || ''}`,
+            `<b>评论者：</b>${escapeHtml(newComment.nick || '匿名')}（${escapeHtml(newComment.mail || '无邮箱')}）`,
+            `<b>页面：</b>${escapeHtml(newComment.url || '')}`,
+            `<b>内容：</b><br>${escapeHtml(newComment.comment || '')}`,
           ].join('<br>');
           await sendPushPlus(ppConfig, ppTitle, ppContent);
         } catch (e) {
@@ -436,6 +442,9 @@ commentRoutes.put('/:id', async (c) => {
   }
 
   const updated = await updateComment(id, updates);
+  if (!updated) {
+    return c.json({ errno: 1, errmsg: 'Comment not found' }, 404);
+  }
   return c.json({ errno: 0, errmsg: '', data: await formatComment(updated, false, c.env) });
 });
 
@@ -561,36 +570,21 @@ commentRoutes.get('/rss', async (c) => {
 
   if (path) {
     // Filter by page path
-    const { getCommentsByIds, getIds } = await import('../db/kv-store.js');
-    const ids = await getIds(`index:comments:url:${path}`);
-    const all = await getCommentsByIds(ids);
-    comments = all
-      .filter((c) => c.status !== 'waiting' && c.status !== 'spam')
+    const rootComments = await getRootCommentsByUrl(path, 'approved', 1, 100);
+    const rootIds = rootComments.data.map((c: KVComment) => c.id as number);
+    const childComments = rootIds.length > 0 ? await getChildCommentsByRids(rootIds, 'approved') : [];
+    comments = [...rootComments.data, ...childComments]
       .sort((a, b) => b.insertedAt.localeCompare(a.insertedAt))
       .slice(0, limit);
   } else if (email || userId) {
     // Get replies to a user's comments
-    const { getCommentsByIds, getIds } = await import('../db/kv-store.js');
     let parentIds: number[] = [];
-    if (email && userId) {
-      const allIds = await getIds('index:comments:all');
-      const allComments = await getCommentsByIds(allIds);
-      parentIds = allComments
-        .filter((c) => c.status !== 'waiting' && c.status !== 'spam' && (c.mail === email || String(c.user_id) === userId))
-        .map((c) => c.id);
-    } else if (email) {
-      const allIds = await getIds('index:comments:all');
-      const allComments = await getCommentsByIds(allIds);
-      parentIds = allComments
-        .filter((c) => c.status !== 'waiting' && c.status !== 'spam' && c.mail === email)
-        .map((c) => c.id);
-    } else {
-      const allIds = await getIds('index:comments:all');
-      const allComments = await getCommentsByIds(allIds);
-      parentIds = allComments
-        .filter((c) => c.status !== 'waiting' && c.status !== 'spam' && String(c.user_id) === userId)
-        .map((c) => c.id);
-    }
+    const allCommentsList = await getAllComments();
+    parentIds = allCommentsList
+      .filter((c) => c.status !== 'waiting' && c.status !== 'spam' && (
+        (email && c.mail === email) || (userId && String(c.user_id) === userId)
+      ))
+      .map((c) => c.id as number);
 
     if (parentIds.length === 0) {
       return rssResponse(c, buildRssXml({
@@ -615,7 +609,6 @@ commentRoutes.get('/rss', async (c) => {
   const userIds = [...new Set(comments.map((r: any) => r.user_id).filter(Boolean))];
   let users: any[] = [];
   if (userIds.length > 0) {
-    const { getUserById } = await import('../db/kv-store.js');
     users = (await Promise.all(userIds.map((uid: number) => getUserById(uid)))).filter(Boolean);
   }
 

@@ -46,10 +46,16 @@ export function renderMarkdown(text: string): string {
     '<img src="$2" alt="$1" loading="lazy" />',
   );
 
-  // Links [text](url)
+  // Links [text](url) — filter dangerous protocols
   html = html.replace(
     /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+    (_match, text, url) => {
+      const trimmed = url.trim();
+      if (/^(javascript|data|vbscript):/i.test(trimmed)) {
+        return `<span>${text}</span>`;
+      }
+      return `<a href="${trimmed}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+    },
   );
 
   // Bold **text** or __text__

@@ -16,11 +16,6 @@ export function getWalinePage(): string {
   <script type="module">
     import { init } from 'https://unpkg.com/@waline/client@v3/dist/waline.js';
 
-    console.log(
-      '%c @waline/server %c v1.32.3 ',
-      'color: white; background: #0078E7; padding:5px 0;',
-      'padding:4px;border:1px solid #0078E7;'
-    );
     const params = new URLSearchParams(location.search.slice(1));
     const waline = init({
       el: '#waline',

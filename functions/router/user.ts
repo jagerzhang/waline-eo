@@ -16,6 +16,10 @@ import {
   getTopCommenters,
 } from '../db/kv-store.js';
 
+function escapeHtmlEmail(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 export const userRoutes = new Hono<{
   Bindings: Env;
   Variables: Variables;
@@ -93,15 +97,13 @@ userRoutes.post('/', async (c) => {
   }
 
   // Rate limit registration: 1 attempt per IP per 60 seconds
-  const regIp = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || '';
-  if (regIp) {
-    const regKey = `reg_limit:${regIp}`;
-    const recent = await WALINE_KV.get(regKey);
-    if (recent) {
-      return c.json({ errno: 1, errmsg: '注册太频繁，请稍后再试' }, 429);
-    }
-    await WALINE_KV.put(regKey, '1', { expirationTtl: 60 });
+  const regIp = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || `noip:${email}`;
+  const regKey = `reg_limit:${regIp}`;
+  const recent = await WALINE_KV.get(regKey);
+  if (recent) {
+    return c.json({ errno: 1, errmsg: '注册太频繁，请稍后再试' }, 429);
   }
+  await WALINE_KV.put(regKey, '1', { expirationTtl: 60 });
 
   // Check if email exists (allow re-registration of unverified users)
   const existing = await getUserByEmail(email);
@@ -123,7 +125,7 @@ userRoutes.post('/', async (c) => {
   const cfg = (key: string) => kvSettings[key] || (c.env as any)[key.toUpperCase()] || '';
   const hasMailService = cfg('smtp_host') || cfg('smtp_service');
 
-  const token = Array.from({ length: 4 }, () => Math.round(Math.random() * 9)).join('');
+  const token = Array.from({ length: 6 }, () => Math.round(Math.random() * 9)).join('');
   const normalType = hasMailService
     ? `verify:${token}:${Date.now() + 1 * 60 * 60 * 1000}`
     : 'guest';
@@ -149,6 +151,7 @@ userRoutes.post('/', async (c) => {
     const siteName = cfg('site_name') || 'Waline';
     const serverUrl = (cfg('site_url') || new URL(c.req.url).origin).replace(/\/$/, '');
     const verifyUrl = `${serverUrl}/api/verification?token=${token}&email=${encodeURIComponent(email)}`;
+    const safeVerifyUrl = escapeHtmlEmail(verifyUrl);
 
     const mailConfig = {
       smtpService: cfg('smtp_service'),
@@ -165,7 +168,7 @@ userRoutes.post('/', async (c) => {
       await sendMail(mailConfig, {
         to: email,
         subject: `[${siteName}] 注册确认 / Registration Confirm`,
-        html: `<p>请点击以下链接确认注册，链接有效期 1 小时：</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>如果您没有注册，请忽略此邮件。</p>`,
+        html: `<p>请点击以下链接确认注册，链接有效期 1 小时：</p><p><a href="${safeVerifyUrl}">${safeVerifyUrl}</a></p><p>如果您没有注册，请忽略此邮件。</p>`,
       });
     } catch (e) {
       console.error('[Verify Mail Error]', e);
@@ -228,6 +231,7 @@ userRoutes.put('/password', async (c) => {
   const siteName = cfg('site_name') || 'Waline';
   const serverUrl = siteUrl ? siteUrl.replace(/\/$/, '') : new URL(c.req.url).origin;
   const profileUrl = `${serverUrl}/ui/profile?token=${token}`;
+  const safeProfileUrl = escapeHtmlEmail(profileUrl);
 
   const mailConfig = {
     smtpService: cfg('smtp_service'),
@@ -244,7 +248,7 @@ userRoutes.put('/password', async (c) => {
     await sendMail(mailConfig, {
       to: email,
       subject: `[${siteName}] 重置密码 / Reset Password`,
-      html: `<p>请点击以下链接登录并修改密码：</p><p><a href="${profileUrl}">${profileUrl}</a></p><p>此链接将在 1 小时后失效。</p>`,
+      html: `<p>请点击以下链接登录并修改密码：</p><p><a href="${safeProfileUrl}">${safeProfileUrl}</a></p><p>此链接将在 1 小时后失效。</p>`,
     });
   } catch (e) {
     console.error('[Password Reset Mail Error]', e);

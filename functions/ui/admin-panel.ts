@@ -1203,11 +1203,15 @@ const STATIC_TAIL = `;
 </body>
 </html>`;
 
+function safeStringify(s: string): string {
+  return JSON.stringify(s).replace(/<\//g, '<\\/');
+}
+
 export async function getAdminPage(env: Env, requestUrl: string): Promise<string> {
   const url = new URL(requestUrl);
   const urlToken = url.searchParams.get('token') || '';
   const oauthError = url.searchParams.get('error') || '';
-  return STATIC_HEAD + JSON.stringify(urlToken) + STATIC_MID + JSON.stringify(oauthError) + STATIC_TAIL;
+  return STATIC_HEAD + safeStringify(urlToken) + STATIC_MID + safeStringify(oauthError) + STATIC_TAIL;
 }
 
 /** Fingerprint for ETag — only valid when no dynamic params */

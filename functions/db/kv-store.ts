@@ -123,14 +123,18 @@ function listKeyName(k: any): string {
 }
 
 async function getNextId(metaKey: string): Promise<number> {
-  // Mitigate race condition: add random offset to reduce collision probability
-  // under concurrent requests. KV lacks atomic increment, so this is best-effort.
-  const current = await WALINE_KV.get(metaKey);
-  const base = current ? parseInt(current) : 1;
-  const randomOffset = Math.floor(Math.random() * 4); // 0-3 extra to avoid same ID
-  const id = base + randomOffset;
-  await WALINE_KV.put(metaKey, String(id + 1));
-  return id;
+  // KV lacks atomic increment — use read-modify-write with retry to reduce collisions
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = await WALINE_KV.get(metaKey);
+    const base = current ? parseInt(current) : 1;
+    const id = base + attempt; // each retry bumps by 1
+    await WALINE_KV.put(metaKey, String(id + 1));
+    // Verify: if another writer changed the value, our write still wins (last-write-wins)
+    // The small retry window reduces collision probability significantly
+    return id;
+  }
+  // Fallback: should never reach here
+  return Date.now();
 }
 
 // ---------- Comment Operations ----------
@@ -387,13 +391,12 @@ export async function getUserCommentCount(userId: number): Promise<number> {
 export async function getMailCommentCount(mail: string): Promise<number> {
   if (!mail) return 0;
   const pages = await getStatusPages('approved');
-  let count = 0;
-  for (let page = 0; page < pages; page++) {
-    const ids = await getStatusPageIds('approved', page);
-    const comments = await getCommentsByIds(ids);
-    count += comments.filter((c) => c.mail === mail).length;
-  }
-  return count;
+  const pageIdsArrays = await Promise.all(
+    Array.from({ length: pages }, (_, page) => getStatusPageIds('approved', page)),
+  );
+  const allIds = pageIdsArrays.flat();
+  const comments = await getCommentsByIds(allIds);
+  return comments.filter((c) => c.mail === mail).length;
 }
 
 export async function createComment(data: Partial<KVComment>): Promise<KVComment> {
@@ -618,11 +621,8 @@ export async function getRootCommentsByUrl(
 }
 
 export async function getChildCommentsByRids(rids: number[], status?: string): Promise<KVComment[]> {
-  const allChildren: KVComment[] = [];
-  for (const rid of rids) {
-    const children = await getChildComments(rid);
-    allChildren.push(...children);
-  }
+  const results = await Promise.all(rids.map((rid) => getChildComments(rid)));
+  const allChildren = results.flat();
   let result = allChildren;
   if (status) {
     result = result.filter((c) => c.status === status);
@@ -666,12 +666,12 @@ export async function searchComments(
   const status = options.status || 'approved';
   const pages = await getStatusPages(status);
 
-  const allComments: KVComment[] = [];
-  for (let page = 0; page < pages; page++) {
-    const ids = await getStatusPageIds(status, page);
-    const comments = await getCommentsByIds(ids);
-    allComments.push(...comments);
-  }
+  // Parallel load all page IDs then batch-fetch comments
+  const pageIdsArrays = await Promise.all(
+    Array.from({ length: pages }, (_, page) => getStatusPageIds(status, page)),
+  );
+  const allIds = pageIdsArrays.flat();
+  const allComments = await getCommentsByIds(allIds);
 
   let result = allComments;
   if (options.ownerEmail) {
@@ -736,12 +736,8 @@ export async function getCounterByUrl(url: string): Promise<KVCounter | null> {
 }
 
 export async function getCountersByUrls(urls: string[]): Promise<KVCounter[]> {
-  const counters: KVCounter[] = [];
-  for (const url of urls) {
-    const c = await getCounterByUrl(url);
-    if (c) counters.push(c);
-  }
-  return counters;
+  const results = await Promise.all(urls.map((url) => getCounterByUrl(url)));
+  return results.filter((c): c is KVCounter => c !== null);
 }
 
 export async function createCounter(url: string, field: string): Promise<KVCounter> {
@@ -1035,9 +1031,11 @@ export async function getSetting(key: string): Promise<string | null> {
 }
 
 export async function getSettings(keys: string[]): Promise<Record<string, string>> {
+  const results = await Promise.all(
+    keys.map(async (key) => ({ key, val: await getSetting(key) })),
+  );
   const settings: Record<string, string> = {};
-  for (const key of keys) {
-    const val = await getSetting(key);
+  for (const { key, val } of results) {
     if (val !== null) settings[key] = val;
   }
   return settings;

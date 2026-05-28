@@ -75,7 +75,17 @@ export async function verifyTotp(
 
   for (let i = -window; i <= window; i++) {
     const expected = await generateHotp(secretBytes, counter + i);
-    if (expected === token) return true;
+    if (timingSafeEqual(expected, token)) return true;
   }
   return false;
+}
+
+/** Constant-time string comparison to prevent timing attacks */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
 }
