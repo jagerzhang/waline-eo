@@ -122,6 +122,20 @@ tokenRoutes.post('/', async (c) => {
  * DELETE /api/token - Logout
  */
 tokenRoutes.delete('/', async (c) => {
+  const authHeader = c.req.header('Authorization') || '';
+  const token = authHeader.replace('Bearer ', '').trim()
+    || c.req.query('token')
+    || '';
+
+  if (token) {
+    try {
+      // 将 token 加入黑名单，过期时间与 JWT 一致（30天）
+      await WALINE_KV.put(`token:blacklist:${token}`, '1', { expirationTtl: 86400 * 30 });
+    } catch (e) {
+      // 即使黑名单写入失败，也返回成功（不影响用户体验）
+    }
+  }
+
   return c.json({ errno: 0, errmsg: '' });
 });
 

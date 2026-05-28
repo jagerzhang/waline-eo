@@ -39,6 +39,16 @@ export const auth = createMiddleware<{
     const payload = await verifyJwt(token, jwtSecret);
     if (!payload?.id) return next();
 
+    // 检查 token 是否在黑名单中
+    try {
+      const blacklisted = await WALINE_KV.get(`token:blacklist:${token}`);
+      if (blacklisted) {
+        return next(); // token 已失效，当作未认证处理
+      }
+    } catch (e) {
+      // KV 查询失败时不阻断请求
+    }
+
     // Fetch user from KV
     const user = await getUserById(payload.id);
 

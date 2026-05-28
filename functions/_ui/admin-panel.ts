@@ -389,9 +389,13 @@ const STATIC_TAIL = `;
     if (!m) return null;
     try { return decodeURIComponent(m[1]); } catch(e) { return m[1]; }
   }
-  var token = localStorage.getItem('TOKEN') || sessionStorage.getItem('TOKEN') || cookieToken();
-  if (token && !localStorage.getItem('TOKEN')) {
-    try { localStorage.setItem('TOKEN', token); } catch(e) {}
+  var token = localStorage.getItem('TOKEN') || sessionStorage.getItem('TOKEN');
+  // 只有在非退出状态下才从 Cookie 恢复
+  if (!token && !sessionStorage.getItem('LOGGED_OUT')) {
+    token = cookieToken();
+    if (token) {
+      try { localStorage.setItem('TOKEN', token); } catch(e) {}
+    }
   }
   var currentUser = null;
   var login2faMode = false;
@@ -568,6 +572,7 @@ const STATIC_TAIL = `;
     api('/token', { method: 'POST', body: JSON.stringify(body) }).then(function(d) {
       if (d.errno === 0 && d.data && d.data.token) {
         token = d.data.token;
+        sessionStorage.removeItem('LOGGED_OUT');
         localStorage.setItem('TOKEN', token);
         document.cookie = 'TOKEN=' + encodeURIComponent(token) + ';path=/;max-age=2592000;SameSite=Lax;Secure';
         currentUser = d.data;
@@ -630,8 +635,23 @@ const STATIC_TAIL = `;
   /* ============ ADMIN LAYOUT ============ */
   document.getElementById('sidebarUserArea').addEventListener('click', function(){ navTo('profile'); });
   document.getElementById('logoutBtn').addEventListener('click', function() {
-    localStorage.removeItem('TOKEN'); sessionStorage.removeItem('TOKEN');
+    // 调用服务端注销 token
+    var logoutToken = token;
+    if (logoutToken) {
+      fetch(API + '/api/token', {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer ' + logoutToken }
+      }).catch(function(){});
+    }
+    // 清除所有存储
+    localStorage.removeItem('TOKEN');
+    sessionStorage.removeItem('TOKEN');
+    // 更可靠的 Cookie 删除
+    document.cookie = 'TOKEN=;path=/;max-age=0;SameSite=Lax;Secure';
     document.cookie = 'TOKEN=;path=/;max-age=0';
+    document.cookie = 'TOKEN=;path=/;expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    // 设置退出标记，防止从 Cookie 恢复
+    sessionStorage.setItem('LOGGED_OUT', '1');
     token = null; currentUser = null; login2faMode = false;
     showPage('login');
   });
