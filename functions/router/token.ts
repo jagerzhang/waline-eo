@@ -100,6 +100,8 @@ tokenRoutes.post('/', async (c) => {
     md5(userEmail),
   ]);
 
+  const isSecure = new URL(c.req.url).protocol === 'https:';
+
   return c.json({
     errno: 0,
     errmsg: '',
@@ -115,6 +117,8 @@ tokenRoutes.post('/', async (c) => {
       '2fa': user['2fa'] ? true : false,
       mailMd5,
     },
+  }, 200, {
+    'Set-Cookie': `TOKEN=${encodeURIComponent(token)}; HttpOnly; ${isSecure ? 'Secure; ' : ''}SameSite=Lax; Path=/; Max-Age=${86400 * 30}`,
   });
 });
 

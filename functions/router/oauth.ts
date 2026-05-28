@@ -151,17 +151,44 @@ oauthRoutes.get('/', async (c) => {
 
     const token = await signJwt({ id: user.id as number }, jwtSecret);
 
-    // Return just JWT token string (matching original Waline)
+    // Set HttpOnly cookie for secure session management
+    const isSecure = new URL(c.req.url).protocol === 'https:';
+    const cookieHeader = `TOKEN=${encodeURIComponent(token)}; HttpOnly; ${isSecure ? 'Secure; ' : ''}SameSite=Lax; Path=/; Max-Age=${86400 * 30}`;
+
+    // Redirect with token (for admin panel) and set cookie (for server auth)
     const sep = redirect.includes('?') ? '&' : '?';
-    return c.redirect(`${redirect}${sep}token=${encodeURIComponent(token)}`);
+    return new Response(null, {
+      status: 302,
+      headers: {
+        'Location': `${redirect}${sep}token=${encodeURIComponent(token)}`,
+        'Set-Cookie': cookieHeader,
+      },
+    });
   } catch {
     return c.redirect(`${redirect}?error=oauth_error`);
   }
 });
 
-/** Ensure redirect is a safe relative path (prevent open redirect attacks) */
+/** Whitelist of valid redirect paths to prevent open redirect attacks */
+const ALLOWED_REDIRECT_PATHS = new Set([
+  '/', '/ui', '/ui/profile', '/ui/register',
+]);
+
+/** Ensure redirect is a safe path (prevent open redirect and phishing attacks) */
 function sanitizeRedirect(input: string | undefined): string {
-  if (!input || !input.startsWith('/') || input.startsWith('//')) return '/ui';
+  if (!input) return '/ui';
+  // Must start with single / and not contain protocol or auth bypass
+  if (!input.startsWith('/') || input.startsWith('//')) return '/ui';
+  // Strip query string and hash before validation
+  const pathOnly = input.split('?')[0].split('#')[0];
+  // Check against whitelist
+  if (!ALLOWED_REDIRECT_PATHS.has(pathOnly)) {
+    // Allow paths starting with /ui/ as sub-pages (but only valid chars)
+    if (pathOnly.startsWith('/ui/') && /^\/ui\/[\w\-/.]+$/.test(pathOnly)) {
+      return input;
+    }
+    return '/ui';
+  }
   return input;
 }
 

@@ -109,7 +109,8 @@ userRoutes.post('/', async (c) => {
   const existing = await getUserByEmail(email);
 
   if (existing && ['administrator', 'guest'].includes(existing.type as string)) {
-    return c.json({ errno: 1, errmsg: 'Registration failed' }, 409);
+    // Don't reveal whether email exists — return uniform success
+    return c.json({ errno: 0, errmsg: '' }, 201);
   }
 
   // Check if first user (becomes admin)
@@ -222,13 +223,25 @@ userRoutes.put('/password', async (c) => {
     return c.json({ errno: 1, errmsg: 'JWT secret not configured' }, 500);
   }
 
-  // Generate a short-lived token (1 hour)
-  const token = await signJwt({ id: user.id as number }, jwtSecret, 3600);
+  // Generate a one-time reset code stored in KV (not exposed in URL)
+  const resetCode = Array.from(
+    crypto.getRandomValues(new Uint8Array(24)),
+    (b) => b.toString(16).padStart(2, '0')
+  ).join('');
+  // Store code -> JWT token mapping in KV, expires in 1 hour
+  const jwtSecret = c.env.JWT_SECRET;
+  if (!jwtSecret) {
+    return c.json({ errno: 1, errmsg: 'JWT secret not configured' }, 500);
+  }
+  const jwtToken = await signJwt({ id: user.id as number }, jwtSecret, 3600);
+  await WALINE_KV.put(`reset:${resetCode}`, jwtToken, { expirationTtl: 3600 });
+
   const siteUrl = cfg('site_url').replace(/^["']|["']$/g, '') || '';
   const siteName = cfg('site_name') || 'Waline';
   const serverUrl = siteUrl ? siteUrl.replace(/\/$/, '') : new URL(c.req.url).origin;
-  const profileUrl = `${serverUrl}/ui/profile?token=${token}`;
-  const safeProfileUrl = escapeHtmlEmail(profileUrl);
+  // Use one-time code (not JWT) in the URL to prevent token leakage via browser history/logs
+  const resetUrl = `${serverUrl}/api/reset-redirect?code=${resetCode}`;
+  const safeResetUrl = escapeHtmlEmail(resetUrl);
 
   const mailConfig = {
     smtpService: cfg('smtp_service'),
@@ -245,7 +258,7 @@ userRoutes.put('/password', async (c) => {
     await sendMail(mailConfig, {
       to: email,
       subject: `[${siteName}] 重置密码 / Reset Password`,
-      html: `<p>请点击以下链接登录并修改密码：</p><p><a href="${safeProfileUrl}">${safeProfileUrl}</a></p><p>此链接将在 1 小时后失效。</p>`,
+      html: `<p>请点击以下链接登录并修改密码：</p><p><a href="${safeResetUrl}">${safeResetUrl}</a></p><p>此链接将在 1 小时后失效。</p>`,
     });
   } catch (e) {
     console.error('[Password Reset Mail Error]', e);

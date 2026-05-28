@@ -17,6 +17,43 @@ import { getCustomSettingsPage, get404Page } from './_ui/custom-admin.js';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+// ==================== 全局速率限制中间件 ====================
+// 按 IP 限流，防止暴力破解和滥用
+const GLOBAL_RATE_LIMIT = 120; // 每分钟最多请求数（GET/HEAD 除外）
+const GLOBAL_RATE_WINDOW = 60;  // 窗口时间（秒）
+
+async function globalRateLimit(ip: string): Promise<boolean> {
+  const key = `rl:global:${ip}`;
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    const raw = await WALINE_KV.get(key);
+    const record = raw ? JSON.parse(raw) : { count: 0, windowStart: now };
+    if (now - record.windowStart > GLOBAL_RATE_WINDOW) {
+      record.count = 1;
+      record.windowStart = now;
+    } else {
+      record.count++;
+    }
+    await WALINE_KV.put(key, JSON.stringify(record), { expirationTtl: GLOBAL_RATE_WINDOW * 2 });
+    return record.count <= GLOBAL_RATE_LIMIT;
+  } catch {
+    // KV 不可用时放行（避免阻断正常流量）
+    return true;
+  }
+}
+
+app.use('*', async (c, next) => {
+  const method = c.req.method;
+  // 仅对写操作和敏感操作进行限流，GET/HEAD/OPTIONS 放行
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    const ip = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+    if (!(await globalRateLimit(ip))) {
+      return c.json({ errno: 1, errmsg: 'Too many requests, please try again later' }, 429);
+    }
+  }
+  await next();
+});
+
 // CORS
 app.use(
   '*',
@@ -122,6 +159,35 @@ app.get('/ui/*', async (c) => {
 // Waline frontend UI (root page)
 app.get('/', (c) => {
   return c.html(getWalinePage());
+});
+
+// Password reset redirect handler: exchanges one-time code for JWT + secure cookie
+app.get('/api/reset-redirect', async (c) => {
+  const code = c.req.query('code');
+  if (!code) {
+    return c.redirect('/ui?error=invalid_reset');
+  }
+  try {
+    const token = await WALINE_KV.get(`reset:${code}`);
+    if (!token) {
+      return c.redirect('/ui?error=reset_expired');
+    }
+    // Delete the one-time code immediately (single-use)
+    await WALINE_KV.delete(`reset:${code}`);
+
+    const isSecure = new URL(c.req.url).protocol === 'https:';
+    const cookieStr = `TOKEN=${encodeURIComponent(token)}; HttpOnly; ${isSecure ? 'Secure; ' : ''}SameSite=Lax; Path=/; Max-Age=${86400}`;
+
+    return new Response(null, {
+      status: 302,
+      headers: {
+        'Location': '/ui/profile',
+        'Set-Cookie': cookieStr,
+      },
+    });
+  } catch {
+    return c.redirect('/ui?error=reset_error');
+  }
 });
 
 // Fallback: catch any unmatched /ui routes (safety net for platform routing quirks)
