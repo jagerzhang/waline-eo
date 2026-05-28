@@ -11,9 +11,9 @@ import { oauthRoutes } from './router/oauth.js';
 import { dbRoutes } from './router/db.js';
 import { imageRoutes } from './router/image.js';
 import { verificationRoutes } from './router/verification.js';
-import { getWalinePage } from './ui/waline-page.js';
-import { getAdminPage, ADMIN_ETAG } from './ui/admin-panel.js';
-import { getCustomSettingsPage, get404Page } from './ui/custom-admin.js';
+import { getWalinePage } from './_ui/waline-page.js';
+import { getAdminPage, ADMIN_ETAG } from './_ui/admin-panel.js';
+import { getCustomSettingsPage, get404Page } from './_ui/custom-admin.js';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
