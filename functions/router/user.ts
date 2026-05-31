@@ -228,11 +228,6 @@ userRoutes.put('/password', async (c) => {
     crypto.getRandomValues(new Uint8Array(24)),
     (b) => b.toString(16).padStart(2, '0')
   ).join('');
-  // Store code -> JWT token mapping in KV, expires in 1 hour
-  const jwtSecret = c.env.JWT_SECRET;
-  if (!jwtSecret) {
-    return c.json({ errno: 1, errmsg: 'JWT secret not configured' }, 500);
-  }
   const jwtToken = await signJwt({ id: user.id as number }, jwtSecret, 3600);
   await WALINE_KV.put(`reset:${resetCode}`, jwtToken, { expirationTtl: 3600 });
 
