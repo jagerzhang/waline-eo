@@ -1,8 +1,11 @@
 /**
  * Minimal Markdown → HTML renderer for Workers
  * Handles common constructs + XSS sanitization
- * Preserves safe <img> tags (emojis from trusted CDNs)
+ * Preserves safe <img> tags for local uploads and the shared QQ emoji pack
  */
+
+const QQ_EMOJI_ORIGIN = 'https://kok.plus';
+const WALINE_IMAGE_ORIGIN = 'https://wl.kok.plus';
 
 export function renderMarkdown(text: string): string {
   if (!text) return '';
@@ -10,23 +13,26 @@ export function renderMarkdown(text: string): string {
   let html = text;
 
   // Preserve safe <img> tags before HTML escaping (emoji support)
-  // @waline/client sends emojis as: <img class="wl-emoji" src="//unpkg.com/..." alt="name">
-  // SECURITY: Only keep src, alt, class, loading attributes; strip everything else (onerror, onload, etc.)
+  // @waline/client sends emojis as: <img class="wl-emoji" src="..." alt="name">
+  // SECURITY: Only keep trusted src plus sanitized alt/class; strip everything else.
   const imgPlaceholders: string[] = [];
   html = html.replace(/<img\s+[^>]*src=["']([^"']+)["'][^>]*\/?>/gi, (match, src) => {
-    // Allow protocol-relative URLs and https from any source (user-uploaded images, CDNs)
-    if (/^(\/\/|https?:\/\/)/.test(src)) {
-      // Extract only safe attributes
-      const altMatch = match.match(/alt=["']([^"']*)["']/i);
-      const classMatch = match.match(/class=["']([^"']*)["']/i);
-      const alt = altMatch ? ` alt="${altMatch[1]}"` : '';
-      const cls = classMatch ? ` class="${classMatch[1]}"` : '';
-      const safeImg = `<img src="${src}"${cls}${alt} loading="lazy" />`;
+    const safeImg = renderTrustedImage(src, getAttr(match, 'alt') || '');
+    if (safeImg) {
       const idx = imgPlaceholders.length;
       imgPlaceholders.push(safeImg);
-      return `__IMG_PLACEHOLDER_${idx}__`;
+      return `@@WALINEIMG${idx}@@`;
     }
-    return match;
+    return '';
+  });
+
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_match, alt, url) => {
+    const safeImg = renderMarkdownImage(url, alt);
+    if (!safeImg) return alt;
+
+    const idx = imgPlaceholders.length;
+    imgPlaceholders.push(safeImg);
+    return `@@WALINEIMG${idx}@@`;
   });
 
   // Escape HTML entities (XSS prevention)
@@ -39,12 +45,6 @@ export function renderMarkdown(text: string): string {
 
   // Inline code
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-  // Images ![alt](url)
-  html = html.replace(
-    /!\[([^\]]*)\]\(([^)]+)\)/g,
-    '<img src="$2" alt="$1" loading="lazy" />',
-  );
 
   // Links [text](url) — filter dangerous protocols
   html = html.replace(
@@ -114,7 +114,7 @@ export function renderMarkdown(text: string): string {
 
   // Restore preserved img tags
   for (let i = 0; i < imgPlaceholders.length; i++) {
-    html = html.replace(`__IMG_PLACEHOLDER_${i}__`, imgPlaceholders[i]);
+    html = html.replace(`@@WALINEIMG${i}@@`, imgPlaceholders[i]);
   }
 
   return html.trim();
@@ -125,5 +125,78 @@ function escapeHtml(text: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(text: string): string {
+  return escapeHtml(text).replace(/`/g, '&#96;');
+}
+
+function getAttr(html: string, name: string): string | null {
+  const match = html.match(new RegExp(`\\s${name}\\s*=\\s*["']([^"']*)["']`, 'i'));
+  return match ? match[1] : null;
+}
+
+function renderTrustedImage(rawUrl: string, alt: string): string | null {
+  const emojiSrc = trustedEmojiUrl(rawUrl);
+  if (emojiSrc) {
+    return `<img src="${escapeAttr(emojiSrc)}" class="wl-emoji" alt="${escapeAttr(alt)}" loading="lazy" />`;
+  }
+
+  const uploadSrc = trustedUploadUrl(rawUrl);
+  if (uploadSrc) {
+    return `<img src="${escapeAttr(uploadSrc)}" alt="${escapeAttr(alt)}" loading="lazy" />`;
+  }
+
+  return null;
+}
+
+function renderMarkdownImage(rawUrl: string, alt: string): string | null {
+  const trustedImg = renderTrustedImage(rawUrl, alt);
+  if (trustedImg) return trustedImg;
+
+  const url = safeMarkdownImageUrl(rawUrl);
+  if (!url) return null;
+  return `<img src="${escapeAttr(url)}" alt="${escapeAttr(alt)}" loading="lazy" />`;
+}
+
+function trustedEmojiUrl(rawUrl: string): string | null {
+  const url = parseImageUrl(rawUrl);
+  if (!url) return null;
+  if (url.protocol !== 'https:') return null;
+  if (url.origin !== QQ_EMOJI_ORIGIN) return null;
+  if (url.search || url.hash) return null;
+  if (!/^\/emoji\/qq\/qq_[A-Za-z0-9_-]+\.gif$/.test(url.pathname)) return null;
+  return url.toString();
+}
+
+function trustedUploadUrl(rawUrl: string): string | null {
+  const url = parseImageUrl(rawUrl);
+  if (!url) return null;
+  if (url.protocol !== 'https:') return null;
+  if (url.origin !== WALINE_IMAGE_ORIGIN) return null;
+  if (url.search || url.hash) return null;
+  if (!/^\/api\/image\/[0-9]+-[A-Za-z0-9]+$/.test(url.pathname)) return null;
+  return url.toString();
+}
+
+function parseImageUrl(rawUrl: string): URL | null {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return null;
+  if (/^(javascript|data|vbscript|file):/i.test(trimmed)) return null;
+
+  try {
+    const normalized = trimmed.startsWith('//') ? `https:${trimmed}` : trimmed;
+    return new URL(normalized, WALINE_IMAGE_ORIGIN);
+  } catch {
+    return null;
+  }
+}
+
+function safeMarkdownImageUrl(rawUrl: string): string | null {
+  const url = parseImageUrl(rawUrl);
+  if (!url) return null;
+  if (!['https:', 'http:'].includes(url.protocol)) return null;
+  return url.toString();
 }

@@ -24,6 +24,7 @@ export function getWalinePage(): string {
       serverURL: location.protocol + '//' + location.host + location.pathname.replace(/\\/+$/, ''),
       recaptchaV3Key: '',
       turnstileKey: '',
+      emoji: ['https://kok.plus/emoji/qq'],
     });
   </script>
 </body>
