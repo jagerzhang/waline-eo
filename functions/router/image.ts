@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
 import { getSetting } from './settings.js';
+import { textBufferSource } from '../utils/crypto-source.js';
 
 export const imageRoutes = new Hono<{
   Bindings: Env;
@@ -8,7 +9,14 @@ export const imageRoutes = new Hono<{
 }>();
 
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif', 'image/svg+xml'];
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
+const EXT_BY_TYPE: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/avif': 'avif',
+};
 
 /**
  * POST /api/image - Upload image (login required)
@@ -33,7 +41,7 @@ imageRoutes.post('/', async (c) => {
   }
 
   if (!ALLOWED_TYPES.includes(file.type)) {
-    return c.json({ errno: 1, errmsg: '不支持的文件类型，仅支持 JPG/PNG/GIF/WebP/AVIF/SVG' }, 400);
+    return c.json({ errno: 1, errmsg: '不支持的文件类型，仅支持 JPG/PNG/GIF/WebP/AVIF' }, 400);
   }
 
   if (file.size > MAX_SIZE) {
@@ -82,6 +90,9 @@ imageRoutes.get('/:key', async (c) => {
   }
   const mime = raw.substring(0, sepIdx);
   const b64 = raw.substring(sepIdx + 1);
+  if (!ALLOWED_TYPES.includes(mime)) {
+    return c.json({ errno: 1, errmsg: 'Unsupported image type' }, 415);
+  }
 
   // Convert base64 to binary
   const binary = atob(b64);
@@ -94,6 +105,7 @@ imageRoutes.get('/:key', async (c) => {
     headers: {
       'Content-Type': mime,
       'Cache-Control': 'public, max-age=31536000',
+      'X-Content-Type-Options': 'nosniff',
     },
   });
 });
@@ -140,7 +152,7 @@ async function uploadToQiniu(file: File, env: Env): Promise<string> {
   // Generate upload token
   const ts = Date.now();
   const rand = Math.random().toString(36).slice(2, 8);
-  const ext = file.name?.split('.').pop() || 'jpg';
+  const ext = EXT_BY_TYPE[file.type] || 'jpg';
   const key = `waline/${ts}-${rand}.${ext}`;
 
   const putPolicy = JSON.stringify({ scope: `${bucket}:${key}`, deadline: Math.floor(Date.now() / 1000) + 3600 });
@@ -148,10 +160,10 @@ async function uploadToQiniu(file: File, env: Env): Promise<string> {
 
   const encoder = new TextEncoder();
   const cryptoKey = await crypto.subtle.importKey(
-    'raw', encoder.encode(secretKey),
+    'raw', textBufferSource(secretKey),
     { name: 'HMAC', hash: 'SHA-1' }, false, ['sign'],
   );
-  const sig = await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(encodedPolicy));
+  const sig = await crypto.subtle.sign('HMAC', cryptoKey, textBufferSource(encodedPolicy));
   const encodedSig = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const uploadToken = `${accessKey}:${encodedSig}:${encodedPolicy}`;
 
@@ -184,10 +196,9 @@ async function uploadToUpyun(file: File, env: Env): Promise<string> {
 
   const ts = Date.now();
   const rand = Math.random().toString(36).slice(2, 8);
-  const ext = file.name?.split('.').pop() || 'jpg';
+  const ext = EXT_BY_TYPE[file.type] || 'jpg';
   const key = `/waline/${ts}-${rand}.${ext}`;
 
-  // MD5 password for yet upyun auth
   const auth = btoa(`${operator}:${password}`);
 
   const arrayBuffer = await file.arrayBuffer();

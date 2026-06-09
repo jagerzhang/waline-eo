@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
 import { signJwt, verifyJwt } from '../middleware/auth.js';
 import {
+  type KVUser,
   getUserByEmail,
   getUserBySocial,
   getUserById,
@@ -85,7 +86,7 @@ oauthRoutes.get('/', async (c) => {
       }
     }
 
-    let user: Record<string, unknown> | null = null;
+    let user: KVUser | null = null;
 
     // If logged in, bind social account to current user
     if (currentUserId && socialField) {

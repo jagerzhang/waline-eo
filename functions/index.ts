@@ -22,6 +22,33 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 const GLOBAL_RATE_LIMIT = 120; // 每分钟最多请求数（GET/HEAD 除外）
 const GLOBAL_RATE_WINDOW = 60;  // 窗口时间（秒）
 
+function normalizeAllowedOrigin(value: string): string {
+  return value.replace(/^https?:\/\//, '').replace(/\/.*$/, '').toLowerCase();
+}
+
+function resolveAllowedOrigins(env: Env): string[] {
+  const domains = env.SECURE_DOMAINS || env.SITE_URL || '';
+  return domains
+    .split(',')
+    .map((d) => normalizeAllowedOrigin(d.trim()))
+    .filter(Boolean);
+}
+
+function isAllowedOrigin(origin: string, env: Env): boolean {
+  if (!origin) return true;
+  const allowed = resolveAllowedOrigins(env);
+  if (!allowed.length) return false;
+
+  let host = '';
+  try {
+    host = new URL(origin).host.toLowerCase();
+  } catch {
+    return false;
+  }
+
+  return allowed.some((domain) => host === domain || host.endsWith(`.${domain}`));
+}
+
 async function globalRateLimit(ip: string): Promise<boolean> {
   const key = `rl:global:${ip}`;
   const now = Math.floor(Date.now() / 1000);
@@ -59,13 +86,8 @@ app.use(
   '*',
   cors({
     origin: (origin, c) => {
-      const secureDomains = c.env.SECURE_DOMAINS;
-      if (!secureDomains) return origin;
-      const allowed = secureDomains.split(',').map((d: string) => d.trim());
-      if (allowed.some((d: string) => origin === d || origin.endsWith(`.${d}`))) {
-        return origin;
-      }
-      return '';
+      if (!origin) return '';
+      return isAllowedOrigin(origin, c.env) ? origin : '';
     },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
@@ -210,7 +232,7 @@ export function onRequest(context: {
   const executionCtx = context.executionCtx || (context.waitUntil
     ? { waitUntil: context.waitUntil.bind(context), passThroughOnException: () => {} }
     : undefined);
-  return app.fetch(context.request, context.env, executionCtx);
+  return app.fetch(context.request, context.env, executionCtx as any);
 }
 
 export default app;

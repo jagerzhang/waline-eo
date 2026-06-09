@@ -1,6 +1,7 @@
 import { createMiddleware } from 'hono/factory';
 import type { Env, Variables } from '../env.js';
 import { getUserById } from '../db/kv-store.js';
+import { bufferSource, textBufferSource } from '../utils/crypto-source.js';
 
 /**
  * Non-blocking auth middleware.
@@ -98,7 +99,7 @@ export async function signJwt(
 
   const key = await crypto.subtle.importKey(
     'raw',
-    new TextEncoder().encode(secret),
+    textBufferSource(secret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
@@ -107,7 +108,7 @@ export async function signJwt(
   const signature = await crypto.subtle.sign(
     'HMAC',
     key,
-    new TextEncoder().encode(signingInput),
+    textBufferSource(signingInput),
   );
 
   return `${signingInput}.${base64UrlEncode(signature)}`;
@@ -125,7 +126,7 @@ export async function verifyJwt(
 
   const key = await crypto.subtle.importKey(
     'raw',
-    new TextEncoder().encode(secret),
+    textBufferSource(secret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['verify'],
@@ -136,7 +137,7 @@ export async function verifyJwt(
     'HMAC',
     key,
     signatureBytes,
-    new TextEncoder().encode(signingInput),
+    textBufferSource(signingInput),
   );
 
   if (!valid) return null;
@@ -162,12 +163,12 @@ function base64UrlEncode(data: string | ArrayBuffer): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function base64UrlDecode(str: string): ArrayBuffer {
+function base64UrlDecode(str: string): ArrayBufferView<ArrayBuffer> {
   const padded = str.replace(/-/g, '+').replace(/_/g, '/');
   const binary = atob(padded);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
-  return bytes.buffer;
+  return bufferSource(bytes);
 }

@@ -3,6 +3,8 @@
  * Uses Web Crypto API (HMAC-SHA1) for Cloudflare Workers compatibility
  */
 
+import { bufferSource } from './crypto-source.js';
+
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 export function base32Encode(data: Uint8Array): string {
@@ -41,9 +43,9 @@ export function generateSecret(length = 20): string {
 
 async function hmacSha1(key: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
   const cryptoKey = await crypto.subtle.importKey(
-    'raw', key, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign'],
+    'raw', bufferSource(key), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign'],
   );
-  const sig = await crypto.subtle.sign('HMAC', cryptoKey, data);
+  const sig = await crypto.subtle.sign('HMAC', cryptoKey, bufferSource(data));
   return new Uint8Array(sig);
 }
 

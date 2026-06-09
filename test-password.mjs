@@ -6,7 +6,12 @@
 import { webcrypto } from 'node:crypto';
 
 // Polyfill global crypto for the test
-global.crypto = webcrypto;
+if (!globalThis.crypto) {
+  Object.defineProperty(globalThis, 'crypto', {
+    value: webcrypto,
+    configurable: true,
+  });
+}
 
 const ITERATIONS = 100000;
 const SALT_LENGTH = 16;

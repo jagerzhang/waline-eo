@@ -5,6 +5,7 @@
  */
 
 import bcrypt from 'bcryptjs';
+import { bufferSource, textBufferSource } from './crypto-source.js';
 
 const ITERATIONS = 100000;
 const SALT_LENGTH = 16;
@@ -87,14 +88,14 @@ async function deriveBits(
 ): Promise<ArrayBuffer> {
   const baseKey = await crypto.subtle.importKey(
     'raw',
-    new TextEncoder().encode(password),
+    textBufferSource(password),
     'PBKDF2',
     false,
     ['deriveBits'],
   );
 
   return crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: bufferSource(salt), iterations, hash: 'SHA-256' },
     baseKey,
     KEY_LENGTH * 8,
   );
@@ -107,14 +108,14 @@ async function deriveKey(
 ): Promise<CryptoKey> {
   const baseKey = await crypto.subtle.importKey(
     'raw',
-    new TextEncoder().encode(password),
+    textBufferSource(password),
     'PBKDF2',
     false,
     ['deriveBits', 'deriveKey'],
   );
 
   return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: bufferSource(salt), iterations, hash: 'SHA-256' },
     baseKey,
     { name: 'HMAC', hash: 'SHA-256', length: KEY_LENGTH * 8 },
     true,

@@ -3,6 +3,8 @@
  * Docs: https://docs.geetest.com/captcha/apirefer/api/server
  */
 
+import { textBufferSource } from './crypto-source.js';
+
 export interface GeetestParams {
   captchaId: string;
   captchaKey: string;
@@ -15,12 +17,12 @@ async function hmacSha256(key: string, message: string): Promise<string> {
   const encoder = new TextEncoder();
   const cryptoKey = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(key),
+    textBufferSource(key),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
   );
-  const signature = await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(message));
+  const signature = await crypto.subtle.sign('HMAC', cryptoKey, textBufferSource(message));
   return Array.from(new Uint8Array(signature))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
