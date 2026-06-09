@@ -16,23 +16,24 @@ export function renderMarkdown(text: string): string {
   // @waline/client sends emojis as: <img class="wl-emoji" src="..." alt="name">
   // SECURITY: Only keep trusted src plus sanitized alt/class; strip everything else.
   const imgPlaceholders: string[] = [];
+  const imgPlaceholderPrefix = `@@WALINEIMG${Math.random().toString(36).slice(2)}@@`;
   html = html.replace(/<img\s+[^>]*src=["']([^"']+)["'][^>]*\/?>/gi, (match, src) => {
     const safeImg = renderTrustedImage(src, getAttr(match, 'alt') || '');
     if (safeImg) {
       const idx = imgPlaceholders.length;
       imgPlaceholders.push(safeImg);
-      return `@@WALINEIMG${idx}@@`;
+      return `${imgPlaceholderPrefix}${idx}@@`;
     }
     return '';
   });
 
-  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_match, alt, url) => {
+  html = html.replace(/!\[([^\]]*)\]\(((?:\([^)]*\)|[^)])+)\)/g, (_match, alt, url) => {
     const safeImg = renderMarkdownImage(url, alt);
     if (!safeImg) return alt;
 
     const idx = imgPlaceholders.length;
     imgPlaceholders.push(safeImg);
-    return `@@WALINEIMG${idx}@@`;
+    return `${imgPlaceholderPrefix}${idx}@@`;
   });
 
   // Escape HTML entities (XSS prevention)
@@ -48,13 +49,13 @@ export function renderMarkdown(text: string): string {
 
   // Links [text](url) — filter dangerous protocols
   html = html.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
+    /\[([^\]]+)\]\(((?:\([^)]*\)|[^)])+)\)/g,
     (_match, text, url) => {
-      const trimmed = url.trim();
-      if (/^(javascript|data|vbscript):/i.test(trimmed)) {
+      const safeUrl = safeMarkdownLinkUrl(url);
+      if (!safeUrl) {
         return `<span>${text}</span>`;
       }
-      return `<a href="${trimmed}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+      return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`;
     },
   );
 
@@ -114,7 +115,7 @@ export function renderMarkdown(text: string): string {
 
   // Restore preserved img tags
   for (let i = 0; i < imgPlaceholders.length; i++) {
-    html = html.replace(`@@WALINEIMG${i}@@`, imgPlaceholders[i]);
+    html = html.replace(`${imgPlaceholderPrefix}${i}@@`, imgPlaceholders[i]);
   }
 
   return html.trim();
@@ -199,4 +200,30 @@ function safeMarkdownImageUrl(rawUrl: string): string | null {
   if (!url) return null;
   if (!['https:', 'http:'].includes(url.protocol)) return null;
   return url.toString();
+}
+
+function safeMarkdownLinkUrl(rawUrl: string): string | null {
+  const trimmed = decodeHtmlEntities(rawUrl).trim();
+  if (!trimmed) return null;
+  const compact = trimmed.replace(/[\u0000-\u001F\u007F\s]+/g, '');
+  if (!compact) return null;
+  if (compact !== trimmed) return null;
+  if (/^\/(?!\/)/.test(compact)) return escapeAttr(compact);
+
+  try {
+    const url = new URL(compact);
+    if (!['http:', 'https:', 'mailto:'].includes(url.protocol)) return null;
+    return escapeAttr(url.toString());
+  } catch {
+    return null;
+  }
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
 }
