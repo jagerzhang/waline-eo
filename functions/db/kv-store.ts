@@ -91,6 +91,44 @@ async function putJson<T>(key: string, value: T): Promise<void> {
   await WALINE_KV.put(key, JSON.stringify(value));
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function deleteKvKey(key: string): Promise<void> {
+  if (!key) return;
+
+  try {
+    await WALINE_KV.delete(key);
+  } catch (error) {
+    // EdgeOne KV delete can fail on existing colon/slash keys. An empty value
+    // is treated as missing by getJson/getRaw callers, so this preserves delete semantics.
+    console.warn(`[Waline KV] delete failed for "${key}", falling back to empty value: ${errorMessage(error)}`);
+    try {
+      await WALINE_KV.put(key, '');
+    } catch (fallbackError) {
+      console.error(`[Waline KV] delete fallback failed for "${key}": ${errorMessage(fallbackError)}`);
+      throw error;
+    }
+  }
+}
+
+async function cleanupKvKey(key: string): Promise<void> {
+  try {
+    await deleteKvKey(key);
+  } catch (error) {
+    console.warn(`[Waline KV] cleanup delete failed for "${key}": ${errorMessage(error)}`);
+  }
+}
+
+async function ignoreCleanupError(label: string, action: Promise<unknown>): Promise<void> {
+  try {
+    await action;
+  } catch (error) {
+    console.warn(`[Waline KV] cleanup failed (${label}): ${errorMessage(error)}`);
+  }
+}
+
 async function getIds(key: string): Promise<number[]> {
   const arr = await getJson<number[]>(key);
   return Array.isArray(arr) ? arr : [];
@@ -123,18 +161,13 @@ function listKeyName(k: any): string {
 }
 
 async function getNextId(metaKey: string): Promise<number> {
-  // KV lacks atomic increment — use read-modify-write with retry to reduce collisions
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const current = await WALINE_KV.get(metaKey);
-    const base = current ? parseInt(current) : 1;
-    const id = base + attempt; // each retry bumps by 1
-    await WALINE_KV.put(metaKey, String(id + 1));
-    // Verify: if another writer changed the value, our write still wins (last-write-wins)
-    // The small retry window reduces collision probability significantly
-    return id;
-  }
-  // Fallback: should never reach here
-  return Date.now();
+  // EdgeOne KV has no atomic increment, so combine the stored counter with a timestamp.
+  const current = await WALINE_KV.get(metaKey);
+  const base = current ? parseInt(current) : 1;
+  const timeBasedId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+  const id = Math.max(base, timeBasedId);
+  await WALINE_KV.put(metaKey, String(id + 1));
+  return id;
 }
 
 // ---------- Comment Operations ----------
@@ -179,6 +212,10 @@ async function setRootCount(url: string, count: number): Promise<void> {
 
 // 插入到 page:0 开头，溢出时级联到后续页
 async function addRootCommentId(url: string, id: number): Promise<void> {
+  // Idempotent insert: stale duplicate IDs in this index make the public
+  // Waline list render the same comment more than once.
+  await removeRootCommentId(url, id);
+
   const pages = await getRootPages(url);
   let page0 = await getRootPageIds(url, 0);
   page0.unshift(id);
@@ -213,15 +250,21 @@ async function addRootCommentId(url: string, id: number): Promise<void> {
 
 async function removeRootCommentId(url: string, id: number): Promise<void> {
   const pages = await getRootPages(url);
+  let removed = 0;
+
   for (let page = 0; page < pages; page++) {
     const ids = await getRootPageIds(url, page);
-    const idx = ids.indexOf(id);
-    if (idx !== -1) {
-      ids.splice(idx, 1);
-      await setRootPageIds(url, page, ids);
-      await setRootCount(url, await getRootCount(url) - 1);
-      return;
+    const filtered = ids.filter((cid) => cid !== id);
+    const removedHere = ids.length - filtered.length;
+
+    if (removedHere > 0) {
+      removed += removedHere;
+      await setRootPageIds(url, page, filtered);
     }
+  }
+
+  if (removed > 0) {
+    await setRootCount(url, Math.max(0, await getRootCount(url) - removed));
   }
 }
 
@@ -300,12 +343,13 @@ async function getStatusPages(status: string): Promise<number> {
 export async function getStatusCommentCount(status: string): Promise<number> {
   const pages = await getStatusPages(status);
   if (pages === 0) return 0;
-  let total = 0;
+  const allIds: number[] = [];
   for (let page = 0; page < pages; page++) {
     const ids = await getStatusPageIds(status, page);
-    total += ids.length;
+    allIds.push(...ids);
   }
-  return total;
+  const comments = await getCommentsByIds(allIds);
+  return comments.filter((c) => c.status === status).length;
 }
 
 async function setStatusPages(status: string, pages: number): Promise<void> {
@@ -313,6 +357,8 @@ async function setStatusPages(status: string, pages: number): Promise<void> {
 }
 
 async function addStatusCommentId(status: string, id: number): Promise<void> {
+  await removeStatusCommentId(status, id);
+
   const pages = await getStatusPages(status);
   let page0 = await getStatusPageIds(status, 0);
   page0.unshift(id);
@@ -347,11 +393,9 @@ async function removeStatusCommentId(status: string, id: number): Promise<void> 
   const pages = await getStatusPages(status);
   for (let page = 0; page < pages; page++) {
     const ids = await getStatusPageIds(status, page);
-    const idx = ids.indexOf(id);
-    if (idx !== -1) {
-      ids.splice(idx, 1);
-      await setStatusPageIds(status, page, ids);
-      return;
+    const filtered = ids.filter((cid) => cid !== id);
+    if (filtered.length !== ids.length) {
+      await setStatusPageIds(status, page, filtered);
     }
   }
 }
@@ -524,100 +568,94 @@ export async function deleteCommentById(id: number): Promise<void> {
   const comment = await getCommentById(id);
   if (!comment) return;
 
-  await WALINE_KV.delete(`comment:${id}`);
+  await deleteKvKey(`comment:${id}`);
 
-  const ops: Promise<void>[] = [
-    removeStatusCommentId(comment.status, id),
-    removeRecentCommentId(id),
+  const ops: Array<[string, Promise<unknown>]> = [
+    [`status:${comment.status}`, removeStatusCommentId(comment.status, id)],
+    ['recent', removeRecentCommentId(id)],
   ];
 
   if (comment.url && comment.rid === null && comment.pid === null) {
-    ops.push(removeRootCommentId(comment.url, id));
-    ops.push(incCommentCount(comment.url, -1));
+    ops.push(['root', removeRootCommentId(comment.url, id)]);
+    ops.push(['count', incCommentCount(comment.url, -1)]);
   }
 
   if (comment.rid !== null) {
-    ops.push(removeChildComment(comment.rid, id));
+    ops.push(['child', removeChildComment(comment.rid, id)]);
   }
 
   if (comment.user_id !== null) {
-    ops.push(removeUserCommentId(comment.user_id, id));
+    ops.push(['user', removeUserCommentId(comment.user_id, id)]);
   }
 
-  await Promise.all(ops);
+  await Promise.all(ops.map(([label, op]) => ignoreCleanupError(`${label}:${id}`, op)));
 }
 
 export async function deleteCommentsByRid(rid: number): Promise<void> {
   const children = await getChildComments(rid);
   await Promise.all(children.map((c) => deleteCommentById(c.id)));
+  if (children.length > 0) {
+    await cleanupKvKey(`comments:rid:${rid}`);
+  }
 }
 
 export async function getCommentsByIds(ids: number[]): Promise<KVComment[]> {
-  const comments = await Promise.all(ids.map((id) => getCommentById(id)));
+  const uniqueIds = Array.from(new Set(ids.map((id) => Number(id)).filter((id) => Number.isFinite(id))));
+  const comments = await Promise.all(uniqueIds.map((id) => getCommentById(id)));
   return comments.filter((c): c is KVComment => c !== null);
+}
+
+function uniqueCommentsById(comments: KVComment[]): KVComment[] {
+  const seen = new Set<number>();
+  const unique: KVComment[] = [];
+
+  for (const comment of comments) {
+    if (seen.has(comment.id)) continue;
+    seen.add(comment.id);
+    unique.push(comment);
+  }
+
+  return unique;
+}
+
+async function getAllRootCommentsByUrl(url: string): Promise<KVComment[]> {
+  const pages = await getRootPages(url);
+  const allComments: KVComment[] = [];
+
+  for (let page = 0; page < pages; page++) {
+    const ids = await getRootPageIds(url, page);
+    const comments = await Promise.all(ids.map((id) => getCommentById(id)));
+    allComments.push(...comments.filter((c): c is KVComment => c !== null));
+  }
+
+  return uniqueCommentsById(allComments);
 }
 
 export async function getRootCommentsByUrl(
   url: string,
   options: { orderBy: string; limit: number; offset: number; status?: string },
 ): Promise<{ comments: KVComment[]; total: number }> {
-  const totalAll = await getRootCount(url);
-  if (totalAll === 0) return { comments: [], total: 0 };
-
   const pages = await getRootPages(url);
+  if (pages === 0) return { comments: [], total: 0 };
 
-  if (options.status) {
-    // When filtering by status, read all comments to ensure correct filtering and sorting
-    const allComments: KVComment[] = [];
-    for (let page = 0; page < pages; page++) {
-      const ids = await getRootPageIds(url, page);
-      const comments = await Promise.all(ids.map((id) => getCommentById(id)));
-      allComments.push(...comments.filter((c): c is KVComment => c !== null));
-    }
+  const allComments = await getAllRootCommentsByUrl(url);
+  let filtered = options.status
+    ? allComments.filter((c) => c.status === options.status)
+    : allComments;
 
-    let filtered = allComments.filter((c) => c.status === options.status);
-
-    if (options.orderBy === 'insertedAt ASC') {
-      filtered.sort((a, b) => a.insertedAt.localeCompare(b.insertedAt));
-    } else if (options.orderBy === 'like DESC') {
-      filtered.sort((a, b) => b.like - a.like);
-    } else {
-      filtered.sort((a, b) => {
-        if (b.sticky !== a.sticky) return b.sticky - a.sticky;
-        return b.insertedAt.localeCompare(a.insertedAt);
-      });
-    }
-
-    const total = filtered.length;
-    return { comments: filtered.slice(options.offset, options.offset + options.limit), total };
+  if (options.orderBy === 'insertedAt ASC') {
+    filtered.sort((a, b) => a.insertedAt.localeCompare(b.insertedAt));
+  } else if (options.orderBy === 'like DESC') {
+    filtered.sort((a, b) => b.like - a.like);
   } else {
-    // No status filter: optimized path, only read needed pages
-    const pageStart = Math.floor(options.offset / ROOT_PAGE_SIZE);
-    const pageEnd = Math.min(Math.floor((options.offset + options.limit - 1) / ROOT_PAGE_SIZE), pages - 1);
-
-    const allComments: KVComment[] = [];
-    for (let page = pageStart; page <= pageEnd; page++) {
-      const ids = await getRootPageIds(url, page);
-      const comments = await Promise.all(ids.map((id) => getCommentById(id)));
-      allComments.push(...comments.filter((c): c is KVComment => c !== null));
-    }
-
-    const startIdxInPage = options.offset % ROOT_PAGE_SIZE;
-    const sliced = allComments.slice(startIdxInPage, startIdxInPage + options.limit);
-
-    if (options.orderBy === 'insertedAt ASC') {
-      sliced.sort((a, b) => a.insertedAt.localeCompare(b.insertedAt));
-    } else if (options.orderBy === 'like DESC') {
-      sliced.sort((a, b) => b.like - a.like);
-    } else {
-      sliced.sort((a, b) => {
-        if (b.sticky !== a.sticky) return b.sticky - a.sticky;
-        return b.insertedAt.localeCompare(a.insertedAt);
-      });
-    }
-
-    return { comments: sliced, total: totalAll };
+    filtered.sort((a, b) => {
+      if (b.sticky !== a.sticky) return b.sticky - a.sticky;
+      return b.insertedAt.localeCompare(a.insertedAt);
+    });
   }
+
+  const total = filtered.length;
+  return { comments: filtered.slice(options.offset, options.offset + options.limit), total };
 }
 
 export async function getChildCommentsByRids(rids: number[], status?: string): Promise<KVComment[]> {
@@ -641,14 +679,15 @@ export async function getRecentComments(limit: number): Promise<KVComment[]> {
 }
 
 export async function getCommentCountByUrl(url: string, _status = 'approved'): Promise<number> {
-  return getCommentCount(url);
+  const comments = await getAllRootCommentsByUrl(url);
+  return comments.filter((c) => c.status === _status).length;
 }
 
 export async function getCommentCountsByUrls(urls: string[]): Promise<Record<string, number>> {
   const map: Record<string, number> = {};
   await Promise.all(
     urls.map(async (url) => {
-      map[url] = await getCommentCount(url);
+      map[url] = await getCommentCountByUrl(url);
     }),
   );
   return map;
@@ -673,7 +712,7 @@ export async function searchComments(
   const allIds = pageIdsArrays.flat();
   const allComments = await getCommentsByIds(allIds);
 
-  let result = allComments;
+  let result = allComments.filter((c) => c.status === status);
   if (options.ownerEmail) {
     result = result.filter((c) => c.mail === options.ownerEmail);
   }
@@ -695,7 +734,7 @@ export async function getAllComments(): Promise<KVComment[]> {
     const comments = await getCommentsByIds(ids);
     allComments.push(...comments);
   }
-  return allComments;
+  return allComments.filter((c) => c.status === 'approved');
 }
 
 export async function clearComments(): Promise<void> {
@@ -718,14 +757,14 @@ export async function clearComments(): Promise<void> {
       if (list && list.keys && list.keys.length > 0) {
         const keys = list.keys.map((k) => listKeyName(k));
         for (let i = 0; i < keys.length; i += 50) {
-          await Promise.all(keys.slice(i, i + 50).map((k) => WALINE_KV.delete(k)));
+          await Promise.all(keys.slice(i, i + 50).map((k) => cleanupKvKey(k)));
         }
       }
       cursor = list?.cursor || undefined;
     } while (cursor);
   }
 
-  await WALINE_KV.delete('index:comments:recent');
+  await cleanupKvKey('index:comments:recent');
   await WALINE_KV.put('meta:next_comment_id', '1');
 }
 
@@ -824,13 +863,13 @@ export async function clearCounters(): Promise<void> {
   const list = await WALINE_KV.list({ prefix: 'counter:' });
   if (list && list.keys) {
     for (const key of list.keys) {
-      await WALINE_KV.delete(listKeyName(key));
+      await deleteKvKey(listKeyName(key));
     }
   }
   const idList = await WALINE_KV.list({ prefix: 'index:counter:id:' });
   if (idList && idList.keys) {
     for (const key of idList.keys) {
-      await WALINE_KV.delete(listKeyName(key));
+      await deleteKvKey(listKeyName(key));
     }
   }
   await WALINE_KV.put('meta:next_counter_id', '1');
@@ -925,31 +964,31 @@ export async function updateUser(id: number, data: Partial<KVUser>): Promise<KVU
   await putJson(`user:${id}`, user);
 
   if (data.email !== undefined && data.email !== oldEmail) {
-    if (oldEmail) await WALINE_KV.delete(`index:user:email:${oldEmail}`);
+    if (oldEmail) await deleteKvKey(`index:user:email:${oldEmail}`);
     if (data.email) await WALINE_KV.put(`index:user:email:${data.email}`, String(id));
   }
   if (data.github !== undefined && data.github !== oldGithub) {
-    if (oldGithub) await WALINE_KV.delete(`index:user:social:github:${oldGithub}`);
+    if (oldGithub) await deleteKvKey(`index:user:social:github:${oldGithub}`);
     if (data.github) await WALINE_KV.put(`index:user:social:github:${data.github}`, String(id));
   }
   if (data.twitter !== undefined && data.twitter !== oldTwitter) {
-    if (oldTwitter) await WALINE_KV.delete(`index:user:social:twitter:${oldTwitter}`);
+    if (oldTwitter) await deleteKvKey(`index:user:social:twitter:${oldTwitter}`);
     if (data.twitter) await WALINE_KV.put(`index:user:social:twitter:${data.twitter}`, String(id));
   }
   if (data.facebook !== undefined && data.facebook !== oldFacebook) {
-    if (oldFacebook) await WALINE_KV.delete(`index:user:social:facebook:${oldFacebook}`);
+    if (oldFacebook) await deleteKvKey(`index:user:social:facebook:${oldFacebook}`);
     if (data.facebook) await WALINE_KV.put(`index:user:social:facebook:${data.facebook}`, String(id));
   }
   if (data.google !== undefined && data.google !== oldGoogle) {
-    if (oldGoogle) await WALINE_KV.delete(`index:user:social:google:${oldGoogle}`);
+    if (oldGoogle) await deleteKvKey(`index:user:social:google:${oldGoogle}`);
     if (data.google) await WALINE_KV.put(`index:user:social:google:${data.google}`, String(id));
   }
   if (data.weibo !== undefined && data.weibo !== oldWeibo) {
-    if (oldWeibo) await WALINE_KV.delete(`index:user:social:weibo:${oldWeibo}`);
+    if (oldWeibo) await deleteKvKey(`index:user:social:weibo:${oldWeibo}`);
     if (data.weibo) await WALINE_KV.put(`index:user:social:weibo:${data.weibo}`, String(id));
   }
   if (data.qq !== undefined && data.qq !== oldQq) {
-    if (oldQq) await WALINE_KV.delete(`index:user:social:qq:${oldQq}`);
+    if (oldQq) await deleteKvKey(`index:user:social:qq:${oldQq}`);
     if (data.qq) await WALINE_KV.put(`index:user:social:qq:${data.qq}`, String(id));
   }
 
@@ -960,15 +999,15 @@ export async function deleteUserById(id: number): Promise<void> {
   const user = await getUserById(id);
   if (!user) return;
 
-  await WALINE_KV.delete(`user:${id}`);
+  await deleteKvKey(`user:${id}`);
   await removeId('index:users:all', id);
-  if (user.email) await WALINE_KV.delete(`index:user:email:${user.email}`);
-  if (user.github) await WALINE_KV.delete(`index:user:social:github:${user.github}`);
-  if (user.twitter) await WALINE_KV.delete(`index:user:social:twitter:${user.twitter}`);
-  if (user.facebook) await WALINE_KV.delete(`index:user:social:facebook:${user.facebook}`);
-  if (user.google) await WALINE_KV.delete(`index:user:social:google:${user.google}`);
-  if (user.weibo) await WALINE_KV.delete(`index:user:social:weibo:${user.weibo}`);
-  if (user.qq) await WALINE_KV.delete(`index:user:social:qq:${user.qq}`);
+  if (user.email) await deleteKvKey(`index:user:email:${user.email}`);
+  if (user.github) await deleteKvKey(`index:user:social:github:${user.github}`);
+  if (user.twitter) await deleteKvKey(`index:user:social:twitter:${user.twitter}`);
+  if (user.facebook) await deleteKvKey(`index:user:social:facebook:${user.facebook}`);
+  if (user.google) await deleteKvKey(`index:user:social:google:${user.google}`);
+  if (user.weibo) await deleteKvKey(`index:user:social:weibo:${user.weibo}`);
+  if (user.qq) await deleteKvKey(`index:user:social:qq:${user.qq}`);
 }
 
 export async function getUsers(options: { limit: number; offset: number }): Promise<{ data: KVUser[]; total: number }> {
@@ -1012,13 +1051,13 @@ export async function getAllUsers(): Promise<KVUser[]> {
 export async function clearUsers(): Promise<void> {
   const ids = await getIds('index:users:all');
   for (const id of ids) {
-    await WALINE_KV.delete(`user:${id}`);
+    await deleteKvKey(`user:${id}`);
   }
-  await WALINE_KV.delete('index:users:all');
+  await deleteKvKey('index:users:all');
   const list = await WALINE_KV.list({ prefix: 'index:user:' });
   if (list && list.keys) {
     for (const key of list.keys) {
-      await WALINE_KV.delete(listKeyName(key));
+      await deleteKvKey(listKeyName(key));
     }
   }
   await WALINE_KV.put('meta:next_user_id', '1');
@@ -1070,7 +1109,7 @@ export async function clearSettings(): Promise<void> {
   const list = await WALINE_KV.list({ prefix: 'setting:' });
   if (list && list.keys) {
     for (const key of list.keys) {
-      await WALINE_KV.delete(listKeyName(key));
+      await deleteKvKey(listKeyName(key));
     }
   }
 }

@@ -462,9 +462,15 @@ commentRoutes.delete('/:id', async (c) => {
     return c.json({ errno: 1, errmsg: 'Unauthorized' }, 403);
   }
 
-  // Cascade delete: remove child comments
-  await deleteCommentsByRid(id);
-  await deleteCommentById(id);
+  try {
+    // Cascade delete: remove child comments
+    await deleteCommentsByRid(id);
+    await deleteCommentById(id);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[Waline] delete comment ${id} failed:`, message);
+    return c.json({ errno: 1, errmsg: `Delete comment failed: ${message}` }, 500);
+  }
 
   return c.json({ errno: 0, errmsg: '' });
 });
