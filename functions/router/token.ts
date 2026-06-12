@@ -64,7 +64,7 @@ tokenRoutes.post('/', async (c) => {
   const user = await getUserByEmail(email);
 
   if (!user) {
-    return c.json({ errno: 1, errmsg: 'User not found' }, 401);
+    return c.json({ errno: 1, errmsg: 'Invalid email or password' }, 401);
   }
 
   if ((user.type as string) === 'banned') {
@@ -73,7 +73,7 @@ tokenRoutes.post('/', async (c) => {
 
   const valid = await verifyPassword(password, user.password as string);
   if (!valid) {
-    return c.json({ errno: 1, errmsg: 'Password mismatch' }, 401);
+    return c.json({ errno: 1, errmsg: 'Invalid email or password' }, 401);
   }
 
   // Check 2FA
@@ -152,11 +152,9 @@ tokenRoutes.get('/2fa', async (c) => {
 
   // Public check: is 2FA enabled for a given email?
   if (!userInfo && email) {
-    const user = await getUserByEmail(email);
-
     return c.json({
       errno: 0,
-      data: { enable: !!user && !!user['2fa'] },
+      data: { enable: false },
     });
   }
 

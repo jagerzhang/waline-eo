@@ -4,7 +4,7 @@
   "description": "Waline-compatible comment system backend running on EdgeOne Edge Functions with KV",
   "type": "module",
   "scripts": {
-    "build": "echo 'Build complete'",
+    "build": "tsc --noEmit",
     "dev": "echo 'EdgeOne local dev not configured'",
     "deploy": "echo 'Deploy via EdgeOne console or CLI'"
   },
@@ -25,8 +25,6 @@
     "hono": "^4.12.9"
   },
   "devDependencies": {
-    "@edgeone/ef-types": "^1.0.5",
-    "edgeone": "^1.0.21",
     "typescript": "^6.0.2"
   }
 }

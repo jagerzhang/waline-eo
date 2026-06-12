@@ -12,8 +12,7 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx",
-    "lib": ["ESNext", "DOM"],
-    "types": ["@edgeone/ef-types"]
+    "lib": ["ESNext", "DOM"]
   },
   "include": ["functions"],
   "exclude": ["node_modules", "waline"]
