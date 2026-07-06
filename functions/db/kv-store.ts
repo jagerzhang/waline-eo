@@ -182,6 +182,48 @@ const ROOT_PAGE_SIZE = 50;
 const STATUS_PAGE_SIZE = 100;
 const RECENT_LIMIT = 200;
 const USER_RECENT_LIMIT = 100;
+const ROOT_STATUS_INDEX_VERSION = '2';
+const SETTINGS_CACHE_TTL_MS = 30_000;
+const COMMENT_STATUSES = ['approved', 'waiting', 'spam'];
+
+const settingsCache = new Map<string, { value: string | null; expiresAt: number }>();
+
+function countKeyStatus(status: string): string {
+  return `meta:comments:status:${status}:count`;
+}
+
+function countKeyUserApproved(userId: number): string {
+  return `count:comments:user:${userId}:approved`;
+}
+
+function normalizeMail(mail: string): string {
+  return mail.trim().toLowerCase();
+}
+
+function countKeyMailApproved(mail: string): string {
+  return `count:comments:mail:${encodeURIComponent(normalizeMail(mail))}:approved`;
+}
+
+async function getNumberKey(key: string): Promise<number | null> {
+  const raw = await WALINE_KV.get(key);
+  if (raw === null || raw === undefined || raw === '') return null;
+  const value = typeof raw === 'number' ? raw : parseInt(String(raw), 10);
+  return Number.isFinite(value) ? value : null;
+}
+
+async function putNumberKey(key: string, value: number): Promise<void> {
+  await WALINE_KV.put(key, String(Math.max(0, Math.floor(value))));
+}
+
+async function incNumberKeyIfInitialized(key: string, delta: number): Promise<void> {
+  const current = await getNumberKey(key);
+  if (current === null) return;
+  await putNumberKey(key, current + delta);
+}
+
+function isRootComment(comment: KVComment): boolean {
+  return !!comment.url && comment.rid === null && comment.pid === null;
+}
 
 // --- 根评论分页 ---
 
@@ -211,10 +253,12 @@ async function setRootCount(url: string, count: number): Promise<void> {
 }
 
 // 插入到 page:0 开头，溢出时级联到后续页
-async function addRootCommentId(url: string, id: number): Promise<void> {
+async function addRootCommentId(url: string, id: number, dedupe = true): Promise<void> {
   // Idempotent insert: stale duplicate IDs in this index make the public
   // Waline list render the same comment more than once.
-  await removeRootCommentId(url, id);
+  if (dedupe) {
+    await removeRootCommentId(url, id);
+  }
 
   const pages = await getRootPages(url);
   let page0 = await getRootPageIds(url, 0);
@@ -266,6 +310,178 @@ async function removeRootCommentId(url: string, id: number): Promise<void> {
   if (removed > 0) {
     await setRootCount(url, Math.max(0, await getRootCount(url) - removed));
   }
+}
+
+// --- URL + status root comment index ---
+
+function rootStatusPageKey(url: string, status: string, page: number): string {
+  return `comments:url:${url}:root:status:${status}:ids:page:${page}`;
+}
+
+function rootStatusPagesKey(url: string, status: string): string {
+  return `meta:comments:url:${url}:root:status:${status}:pages`;
+}
+
+function rootStatusCountKey(url: string, status: string): string {
+  return `meta:comments:url:${url}:root:status:${status}:count`;
+}
+
+function rootStatusIndexedKey(url: string, status: string): string {
+  return `meta:comments:url:${url}:root:status:${status}:indexed`;
+}
+
+function rootStatusStickyKey(url: string, status: string): string {
+  return `comments:url:${url}:root:status:${status}:sticky`;
+}
+
+async function getRootStatusPageIds(url: string, status: string, page: number): Promise<number[]> {
+  const arr = await getJson<number[]>(rootStatusPageKey(url, status, page));
+  return Array.isArray(arr) ? arr : [];
+}
+
+async function setRootStatusPageIds(url: string, status: string, page: number, ids: number[]): Promise<void> {
+  await putJson(rootStatusPageKey(url, status, page), ids);
+}
+
+async function getRootStatusPages(url: string, status: string): Promise<number> {
+  return (await getJson<number>(rootStatusPagesKey(url, status))) || 0;
+}
+
+async function setRootStatusPages(url: string, status: string, pages: number): Promise<void> {
+  await putJson(rootStatusPagesKey(url, status), pages);
+}
+
+async function getRootStatusStickyIds(url: string, status: string): Promise<number[]> {
+  const ids = await getJson<number[]>(rootStatusStickyKey(url, status));
+  return Array.isArray(ids) ? ids : [];
+}
+
+async function setRootStatusStickyIds(url: string, status: string, ids: number[]): Promise<void> {
+  await putJson(rootStatusStickyKey(url, status), Array.from(new Set(ids)));
+}
+
+async function isRootStatusIndexReady(url: string, status: string): Promise<boolean> {
+  return await WALINE_KV.get(rootStatusIndexedKey(url, status)) === ROOT_STATUS_INDEX_VERSION;
+}
+
+async function rebuildRootStatusIndex(url: string, status: string): Promise<void> {
+  const oldPages = await getRootStatusPages(url, status);
+  const comments = (await getAllRootCommentsByUrl(url))
+    .filter((c) => c.status === status)
+    .sort((a, b) => b.insertedAt.localeCompare(a.insertedAt));
+
+  const pages = Math.ceil(comments.length / ROOT_PAGE_SIZE);
+  for (let page = 0; page < pages; page++) {
+    const ids = comments
+      .slice(page * ROOT_PAGE_SIZE, (page + 1) * ROOT_PAGE_SIZE)
+      .map((c) => c.id);
+    await setRootStatusPageIds(url, status, page, ids);
+  }
+  for (let page = pages; page < oldPages; page++) {
+    await cleanupKvKey(rootStatusPageKey(url, status, page));
+  }
+
+  const stickyIds = comments
+    .filter((c) => c.sticky)
+    .map((c) => c.id);
+
+  await Promise.all([
+    setRootStatusPages(url, status, pages),
+    putNumberKey(rootStatusCountKey(url, status), comments.length),
+    setRootStatusStickyIds(url, status, stickyIds),
+    WALINE_KV.put(rootStatusIndexedKey(url, status), ROOT_STATUS_INDEX_VERSION),
+  ]);
+}
+
+async function ensureRootStatusIndex(url: string, status: string): Promise<void> {
+  if (await isRootStatusIndexReady(url, status)) return;
+  await rebuildRootStatusIndex(url, status);
+}
+
+async function addRootStatusCommentId(comment: KVComment, dedupe = true): Promise<void> {
+  if (!isRootComment(comment)) return;
+  const { url, status, id } = comment;
+  if (!(await isRootStatusIndexReady(url, status))) return;
+
+  if (dedupe) {
+    await removeRootStatusCommentId(url, status, id);
+  }
+
+  const pages = await getRootStatusPages(url, status);
+  const page0 = await getRootStatusPageIds(url, status, 0);
+  page0.unshift(id);
+
+  if (page0.length > ROOT_PAGE_SIZE) {
+    const overflow = page0.splice(ROOT_PAGE_SIZE);
+    await setRootStatusPageIds(url, status, 0, page0);
+
+    let currentPage = 1;
+    let remaining = overflow;
+    while (remaining.length > 0) {
+      const pageIds = await getRootStatusPageIds(url, status, currentPage);
+      pageIds.unshift(...remaining);
+      if (pageIds.length > ROOT_PAGE_SIZE) {
+        remaining = pageIds.splice(ROOT_PAGE_SIZE);
+        await setRootStatusPageIds(url, status, currentPage, pageIds);
+        currentPage++;
+      } else {
+        await setRootStatusPageIds(url, status, currentPage, pageIds);
+        remaining = [];
+      }
+    }
+
+    await setRootStatusPages(url, status, Math.max(pages, currentPage + (remaining.length > 0 ? 1 : 0)));
+  } else {
+    await setRootStatusPageIds(url, status, 0, page0);
+    if (pages === 0) await setRootStatusPages(url, status, 1);
+  }
+
+  await incNumberKeyIfInitialized(rootStatusCountKey(url, status), 1);
+  if (comment.sticky) {
+    const stickyIds = await getRootStatusStickyIds(url, status);
+    if (!stickyIds.includes(id)) {
+      stickyIds.unshift(id);
+      await setRootStatusStickyIds(url, status, stickyIds);
+    }
+  }
+}
+
+async function removeRootStatusCommentId(url: string, status: string, id: number): Promise<void> {
+  if (!(await isRootStatusIndexReady(url, status))) return;
+
+  const pages = await getRootStatusPages(url, status);
+  let removed = 0;
+
+  for (let page = 0; page < pages; page++) {
+    const ids = await getRootStatusPageIds(url, status, page);
+    const filtered = ids.filter((cid) => cid !== id);
+    const removedHere = ids.length - filtered.length;
+    if (removedHere > 0) {
+      removed += removedHere;
+      await setRootStatusPageIds(url, status, page, filtered);
+    }
+  }
+
+  if (removed > 0) {
+    await incNumberKeyIfInitialized(rootStatusCountKey(url, status), -removed);
+    const stickyIds = await getRootStatusStickyIds(url, status);
+    const filteredSticky = stickyIds.filter((cid) => cid !== id);
+    if (filteredSticky.length !== stickyIds.length) {
+      await setRootStatusStickyIds(url, status, filteredSticky);
+    }
+  }
+}
+
+async function updateRootStatusSticky(comment: KVComment): Promise<void> {
+  if (!isRootComment(comment)) return;
+  if (!(await isRootStatusIndexReady(comment.url, comment.status))) return;
+
+  const stickyIds = await getRootStatusStickyIds(comment.url, comment.status);
+  const withoutCurrent = stickyIds.filter((id) => id !== comment.id);
+  if (comment.sticky) {
+    withoutCurrent.unshift(comment.id);
+  }
+  await setRootStatusStickyIds(comment.url, comment.status, withoutCurrent);
 }
 
 // --- 子评论聚合 ---
@@ -341,23 +557,33 @@ async function getStatusPages(status: string): Promise<number> {
 }
 
 export async function getStatusCommentCount(status: string): Promise<number> {
+  const cached = await getNumberKey(countKeyStatus(status));
+  if (cached !== null) return cached;
+
   const pages = await getStatusPages(status);
-  if (pages === 0) return 0;
+  if (pages === 0) {
+    await putNumberKey(countKeyStatus(status), 0);
+    return 0;
+  }
   const allIds: number[] = [];
   for (let page = 0; page < pages; page++) {
     const ids = await getStatusPageIds(status, page);
     allIds.push(...ids);
   }
   const comments = await getCommentsByIds(allIds);
-  return comments.filter((c) => c.status === status).length;
+  const count = comments.filter((c) => c.status === status).length;
+  await putNumberKey(countKeyStatus(status), count);
+  return count;
 }
 
 async function setStatusPages(status: string, pages: number): Promise<void> {
   await putJson(`meta:comments:status:${status}:pages`, pages);
 }
 
-async function addStatusCommentId(status: string, id: number): Promise<void> {
-  await removeStatusCommentId(status, id);
+async function addStatusCommentId(status: string, id: number, dedupe = true): Promise<void> {
+  if (dedupe) {
+    await removeStatusCommentId(status, id);
+  }
 
   const pages = await getStatusPages(status);
   let page0 = await getStatusPageIds(status, 0);
@@ -387,16 +613,23 @@ async function addStatusCommentId(status: string, id: number): Promise<void> {
     await setStatusPageIds(status, 0, page0);
     if (pages === 0) await setStatusPages(status, 1);
   }
+
+  await incNumberKeyIfInitialized(countKeyStatus(status), 1);
 }
 
 async function removeStatusCommentId(status: string, id: number): Promise<void> {
   const pages = await getStatusPages(status);
+  let removed = 0;
   for (let page = 0; page < pages; page++) {
     const ids = await getStatusPageIds(status, page);
     const filtered = ids.filter((cid) => cid !== id);
     if (filtered.length !== ids.length) {
+      removed += ids.length - filtered.length;
       await setStatusPageIds(status, page, filtered);
     }
+  }
+  if (removed > 0) {
+    await incNumberKeyIfInitialized(countKeyStatus(status), -removed);
   }
 }
 
@@ -424,23 +657,109 @@ async function removeUserCommentId(userId: number, id: number): Promise<void> {
 // --- 核心 API ---
 
 export async function getUserCommentCount(userId: number): Promise<number> {
-  const key = `index:comments:user:${userId}:recent`;
-  const raw = await getJson<number[]>(key);
-  const ids = Array.isArray(raw) ? raw : [];
-  if (ids.length === 0) return 0;
-  const comments = await getCommentsByIds(ids);
-  return comments.filter((c) => c.status === 'approved').length;
+  const counts = await getUserCommentCounts([userId]);
+  return counts.get(userId) || 0;
 }
 
 export async function getMailCommentCount(mail: string): Promise<number> {
-  if (!mail) return 0;
+  const counts = await getMailCommentCounts([mail]);
+  return counts.get(normalizeMail(mail)) || 0;
+}
+
+async function getApprovedCommentsForCounting(): Promise<KVComment[]> {
   const pages = await getStatusPages('approved');
   const pageIdsArrays = await Promise.all(
     Array.from({ length: pages }, (_, page) => getStatusPageIds('approved', page)),
   );
   const allIds = pageIdsArrays.flat();
-  const comments = await getCommentsByIds(allIds);
-  return comments.filter((c) => c.mail === mail).length;
+  return (await getCommentsByIds(allIds)).filter((c) => c.status === 'approved');
+}
+
+export async function getUserCommentCounts(userIds: number[]): Promise<Map<number, number>> {
+  const normalizedIds = Array.from(new Set(
+    userIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0),
+  ));
+  const result = new Map<number, number>();
+  if (normalizedIds.length === 0) return result;
+
+  const missing: number[] = [];
+  await Promise.all(
+    normalizedIds.map(async (id) => {
+      const cached = await getNumberKey(countKeyUserApproved(id));
+      if (cached === null) {
+        missing.push(id);
+      } else {
+        result.set(id, cached);
+      }
+    }),
+  );
+
+  if (missing.length > 0) {
+    const missingSet = new Set(missing);
+    for (const id of missing) result.set(id, 0);
+    const comments = await getApprovedCommentsForCounting();
+    for (const comment of comments) {
+      const userId = comment.user_id;
+      if (userId !== null && missingSet.has(userId)) {
+        result.set(userId, (result.get(userId) || 0) + 1);
+      }
+    }
+    await Promise.all(missing.map((id) => putNumberKey(countKeyUserApproved(id), result.get(id) || 0)));
+  }
+
+  return result;
+}
+
+export async function getMailCommentCounts(mails: string[]): Promise<Map<string, number>> {
+  const normalizedMails = Array.from(new Set(
+    mails
+      .map((mail) => normalizeMail(mail || ''))
+      .filter(Boolean),
+  ));
+  const result = new Map<string, number>();
+  if (normalizedMails.length === 0) return result;
+
+  const missing: string[] = [];
+  await Promise.all(
+    normalizedMails.map(async (mail) => {
+      const cached = await getNumberKey(countKeyMailApproved(mail));
+      if (cached === null) {
+        missing.push(mail);
+      } else {
+        result.set(mail, cached);
+      }
+    }),
+  );
+
+  if (missing.length > 0) {
+    const missingSet = new Set(missing);
+    for (const mail of missing) result.set(mail, 0);
+    const comments = await getApprovedCommentsForCounting();
+    for (const comment of comments) {
+      const mail = normalizeMail(comment.mail || '');
+      if (mail && missingSet.has(mail)) {
+        result.set(mail, (result.get(mail) || 0) + 1);
+      }
+    }
+    await Promise.all(missing.map((mail) => putNumberKey(countKeyMailApproved(mail), result.get(mail) || 0)));
+  }
+
+  return result;
+}
+
+async function updateApprovedAuthorCounts(comment: KVComment, delta: number): Promise<void> {
+  if (comment.status !== 'approved') return;
+  const ops: Promise<void>[] = [];
+  if (comment.user_id !== null) {
+    ops.push(incNumberKeyIfInitialized(countKeyUserApproved(comment.user_id), delta));
+  }
+  const mail = normalizeMail(comment.mail || '');
+  if (mail) {
+    ops.push(incNumberKeyIfInitialized(countKeyMailApproved(mail), delta));
+  }
+  await Promise.all(ops);
 }
 
 export async function createComment(data: Partial<KVComment>): Promise<KVComment> {
@@ -471,11 +790,12 @@ export async function createComment(data: Partial<KVComment>): Promise<KVComment
 
   const ops: Promise<void>[] = [
     addRecentCommentId(id),
-    addStatusCommentId(comment.status, id),
+    addStatusCommentId(comment.status, id, false),
   ];
 
   if (comment.url && comment.rid === null && comment.pid === null) {
-    ops.push(addRootCommentId(comment.url, id));
+    ops.push(addRootCommentId(comment.url, id, false));
+    ops.push(addRootStatusCommentId(comment, false));
     ops.push(incCommentCount(comment.url, 1));
   }
 
@@ -486,6 +806,8 @@ export async function createComment(data: Partial<KVComment>): Promise<KVComment
   if (comment.user_id !== null) {
     ops.push(addUserCommentId(comment.user_id, id));
   }
+
+  ops.push(updateApprovedAuthorCounts(comment, 1));
 
   await Promise.all(ops);
 
@@ -505,6 +827,9 @@ export async function updateComment(id: number, data: Partial<KVComment>): Promi
   const oldRid = comment.rid;
   const oldPid = comment.pid;
   const oldUserId = comment.user_id;
+  const oldMail = comment.mail;
+  const oldSticky = comment.sticky;
+  const oldCommentForCounts: KVComment = { ...comment };
 
   Object.assign(comment, data);
   comment.updatedAt = nowIso();
@@ -515,6 +840,8 @@ export async function updateComment(id: number, data: Partial<KVComment>): Promi
   const ridChanged = data.rid !== undefined && data.rid !== oldRid;
   const pidChanged = data.pid !== undefined && data.pid !== oldPid;
   const userChanged = data.user_id !== undefined && data.user_id !== oldUserId;
+  const mailChanged = data.mail !== undefined && data.mail !== oldMail;
+  const stickyChanged = data.sticky !== undefined && data.sticky !== oldSticky;
 
   if (urlChanged || statusChanged || ridChanged || pidChanged) {
     const removeOps: Promise<void>[] = [
@@ -524,6 +851,7 @@ export async function updateComment(id: number, data: Partial<KVComment>): Promi
 
     if (oldUrl && oldRid === null && oldPid === null) {
       removeOps.push(removeRootCommentId(oldUrl, id));
+      removeOps.push(removeRootStatusCommentId(oldUrl, oldStatus, id));
       removeOps.push(incCommentCount(oldUrl, -1));
     }
 
@@ -544,6 +872,7 @@ export async function updateComment(id: number, data: Partial<KVComment>): Promi
 
     if (comment.url && comment.rid === null && comment.pid === null) {
       addOps.push(addRootCommentId(comment.url, id));
+      addOps.push(addRootStatusCommentId(comment));
       addOps.push(incCommentCount(comment.url, 1));
     }
 
@@ -559,6 +888,17 @@ export async function updateComment(id: number, data: Partial<KVComment>): Promi
   } else if (userChanged) {
     if (oldUserId !== null) await removeUserCommentId(oldUserId, id);
     if (comment.user_id !== null) await addUserCommentId(comment.user_id, id);
+  }
+
+  if (stickyChanged && !(urlChanged || statusChanged || ridChanged || pidChanged)) {
+    await updateRootStatusSticky(comment);
+  }
+
+  if (statusChanged || userChanged || mailChanged) {
+    await Promise.all([
+      updateApprovedAuthorCounts(oldCommentForCounts, -1),
+      updateApprovedAuthorCounts(comment, 1),
+    ]);
   }
 
   return comment;
@@ -577,6 +917,7 @@ export async function deleteCommentById(id: number): Promise<void> {
 
   if (comment.url && comment.rid === null && comment.pid === null) {
     ops.push(['root', removeRootCommentId(comment.url, id)]);
+    ops.push(['root-status', removeRootStatusCommentId(comment.url, comment.status, id)]);
     ops.push(['count', incCommentCount(comment.url, -1)]);
   }
 
@@ -587,6 +928,8 @@ export async function deleteCommentById(id: number): Promise<void> {
   if (comment.user_id !== null) {
     ops.push(['user', removeUserCommentId(comment.user_id, id)]);
   }
+
+  ops.push(['author-count', updateApprovedAuthorCounts(comment, -1)]);
 
   await Promise.all(ops.map(([label, op]) => ignoreCleanupError(`${label}:${id}`, op)));
 }
@@ -631,6 +974,78 @@ async function getAllRootCommentsByUrl(url: string): Promise<KVComment[]> {
   return uniqueCommentsById(allComments);
 }
 
+async function getRootStatusCount(url: string, status: string): Promise<number> {
+  await ensureRootStatusIndex(url, status);
+  const cached = await getNumberKey(rootStatusCountKey(url, status));
+  return cached || 0;
+}
+
+async function getAllRootStatusCommentsByUrl(url: string, status: string): Promise<KVComment[]> {
+  await ensureRootStatusIndex(url, status);
+  const pages = await getRootStatusPages(url, status);
+  const allIds: number[] = [];
+  for (let page = 0; page < pages; page++) {
+    allIds.push(...await getRootStatusPageIds(url, status, page));
+  }
+  const comments = await getCommentsByIds(allIds);
+  return comments.filter((c) => isRootComment(c) && c.url === url && c.status === status);
+}
+
+async function getRootStatusCommentsDesc(
+  url: string,
+  status: string,
+  limit: number,
+  offset: number,
+): Promise<{ comments: KVComment[]; total: number }> {
+  await ensureRootStatusIndex(url, status);
+  const total = await getRootStatusCount(url, status);
+  if (total === 0 || limit <= 0 || offset >= total) return { comments: [], total };
+
+  const stickyIds = await getRootStatusStickyIds(url, status);
+  const stickyComments = stickyIds.length > 0
+    ? (await getCommentsByIds(stickyIds))
+      .filter((c) => isRootComment(c) && c.url === url && c.status === status && !!c.sticky)
+      .sort((a, b) => b.insertedAt.localeCompare(a.insertedAt))
+    : [];
+  const stickySet = new Set(stickyComments.map((c) => c.id));
+  const resultIds: number[] = [];
+
+  if (offset < stickyComments.length) {
+    resultIds.push(...stickyComments.slice(offset, offset + limit).map((c) => c.id));
+  }
+
+  let needed = limit - resultIds.length;
+  if (needed > 0) {
+    const normalOffset = Math.max(0, offset - stickyComments.length);
+    const pages = await getRootStatusPages(url, status);
+    let skipped = 0;
+
+    for (let page = 0; page < pages && needed > 0; page++) {
+      const ids = await getRootStatusPageIds(url, status, page);
+      for (const id of ids) {
+        if (stickySet.has(id)) continue;
+        if (skipped < normalOffset) {
+          skipped++;
+          continue;
+        }
+        resultIds.push(id);
+        needed--;
+        if (needed === 0) break;
+      }
+    }
+  }
+
+  const commentsById = new Map(
+    (await getCommentsByIds(resultIds))
+      .filter((c) => isRootComment(c) && c.url === url && c.status === status)
+      .map((c) => [c.id, c]),
+  );
+  return {
+    comments: resultIds.map((id) => commentsById.get(id)).filter((c): c is KVComment => !!c),
+    total,
+  };
+}
+
 export async function getRootCommentsByUrl(
   url: string,
   options: { orderBy: string; limit: number; offset: number; status?: string },
@@ -638,10 +1053,13 @@ export async function getRootCommentsByUrl(
   const pages = await getRootPages(url);
   if (pages === 0) return { comments: [], total: 0 };
 
-  const allComments = await getAllRootCommentsByUrl(url);
+  if (options.status && options.orderBy === 'insertedAt DESC') {
+    return getRootStatusCommentsDesc(url, options.status, options.limit, options.offset);
+  }
+
   let filtered = options.status
-    ? allComments.filter((c) => c.status === options.status)
-    : allComments;
+    ? await getAllRootStatusCommentsByUrl(url, options.status)
+    : await getAllRootCommentsByUrl(url);
 
   if (options.orderBy === 'insertedAt ASC') {
     filtered.sort((a, b) => a.insertedAt.localeCompare(b.insertedAt));
@@ -679,8 +1097,7 @@ export async function getRecentComments(limit: number): Promise<KVComment[]> {
 }
 
 export async function getCommentCountByUrl(url: string, _status = 'approved'): Promise<number> {
-  const comments = await getAllRootCommentsByUrl(url);
-  return comments.filter((c) => c.status === _status).length;
+  return getRootStatusCount(url, _status);
 }
 
 export async function getCommentCountsByUrls(urls: string[]): Promise<Record<string, number>> {
@@ -693,6 +1110,82 @@ export async function getCommentCountsByUrls(urls: string[]): Promise<Record<str
   return map;
 }
 
+async function getStatusCommentsPage(
+  status: string,
+  limit: number,
+  offset: number,
+): Promise<{ data: KVComment[]; total: number }> {
+  const total = await getStatusCommentCount(status);
+  if (total === 0 || limit <= 0 || offset >= total) return { data: [], total };
+
+  const pages = await getStatusPages(status);
+  const ids: number[] = [];
+  let skipped = 0;
+
+  for (let page = 0; page < pages && ids.length < limit; page++) {
+    const pageIds = await getStatusPageIds(status, page);
+    for (const id of pageIds) {
+      if (skipped < offset) {
+        skipped++;
+        continue;
+      }
+      ids.push(id);
+      if (ids.length === limit) break;
+    }
+  }
+
+  const commentsById = new Map(
+    (await getCommentsByIds(ids))
+      .filter((c) => c.status === status)
+      .map((c) => [c.id, c]),
+  );
+  return {
+    data: ids.map((id) => commentsById.get(id)).filter((c): c is KVComment => !!c),
+    total,
+  };
+}
+
+async function getStatusIdsWindow(status: string, limit: number): Promise<number[]> {
+  if (limit <= 0) return [];
+  const pages = await getStatusPages(status);
+  const ids: number[] = [];
+
+  for (let page = 0; page < pages && ids.length < limit; page++) {
+    const pageIds = await getStatusPageIds(status, page);
+    ids.push(...pageIds.slice(0, limit - ids.length));
+  }
+
+  return ids;
+}
+
+async function getCommentsPageAcrossStatuses(
+  statuses: string[],
+  limit: number,
+  offset: number,
+): Promise<{ data: KVComment[]; total: number }> {
+  const counts = await Promise.all(statuses.map((status) => getStatusCommentCount(status)));
+  const total = counts.reduce((sum, count) => sum + count, 0);
+  if (total === 0 || limit <= 0 || offset >= total) return { data: [], total };
+
+  const windowSize = offset + limit;
+  const ids = (await Promise.all(statuses.map((status) => getStatusIdsWindow(status, windowSize)))).flat();
+  const statusSet = new Set(statuses);
+  const comments = (await getCommentsByIds(ids))
+    .filter((c) => statusSet.has(c.status))
+    .sort((a, b) => b.insertedAt.localeCompare(a.insertedAt));
+
+  return { data: comments.slice(offset, offset + limit), total };
+}
+
+async function getAllStatusComments(status: string): Promise<KVComment[]> {
+  const pages = await getStatusPages(status);
+  const pageIdsArrays = await Promise.all(
+    Array.from({ length: pages }, (_, page) => getStatusPageIds(status, page)),
+  );
+  const allIds = pageIdsArrays.flat();
+  return (await getCommentsByIds(allIds)).filter((c) => c.status === status);
+}
+
 export async function searchComments(
   options: {
     status?: string;
@@ -702,17 +1195,18 @@ export async function searchComments(
     offset: number;
   },
 ): Promise<{ data: KVComment[]; total: number }> {
-  const status = options.status || 'approved';
-  const pages = await getStatusPages(status);
+  if (options.status && !options.keyword && !options.ownerEmail) {
+    return getStatusCommentsPage(options.status, options.limit, options.offset);
+  }
 
-  // Parallel load all page IDs then batch-fetch comments
-  const pageIdsArrays = await Promise.all(
-    Array.from({ length: pages }, (_, page) => getStatusPageIds(status, page)),
-  );
-  const allIds = pageIdsArrays.flat();
-  const allComments = await getCommentsByIds(allIds);
+  const statuses = options.status ? [options.status] : COMMENT_STATUSES;
+  if (!options.keyword && !options.ownerEmail) {
+    return getCommentsPageAcrossStatuses(statuses, options.limit, options.offset);
+  }
 
-  let result = allComments.filter((c) => c.status === status);
+  const allComments = (await Promise.all(statuses.map((status) => getAllStatusComments(status)))).flat();
+
+  let result = allComments;
   if (options.ownerEmail) {
     result = result.filter((c) => c.mail === options.ownerEmail);
   }
@@ -727,14 +1221,11 @@ export async function searchComments(
 }
 
 export async function getAllComments(): Promise<KVComment[]> {
-  const pages = await getStatusPages('approved');
-  const allComments: KVComment[] = [];
-  for (let page = 0; page < pages; page++) {
-    const ids = await getStatusPageIds('approved', page);
-    const comments = await getCommentsByIds(ids);
-    allComments.push(...comments);
-  }
-  return allComments.filter((c) => c.status === 'approved');
+  const allComments = (await Promise.all(
+    COMMENT_STATUSES.map((status) => getAllStatusComments(status)),
+  )).flat();
+  allComments.sort((a, b) => b.insertedAt.localeCompare(a.insertedAt));
+  return allComments;
 }
 
 export async function clearComments(): Promise<void> {
@@ -743,6 +1234,8 @@ export async function clearComments(): Promise<void> {
     'comments:url:',
     'comments:rid:',
     'count:comments:url:',
+    'count:comments:user:',
+    'count:comments:mail:',
     'index:comments:status:',
     'meta:comments:',
     'index:comments:user:',
@@ -845,33 +1338,46 @@ export async function updateCounter(url: string, field: string, value: number): 
 }
 
 export async function getAllCounters(): Promise<KVCounter[]> {
-  const list = await WALINE_KV.list({ prefix: 'counter:' });
   const counters: KVCounter[] = [];
-  if (list && list.keys) {
-    for (const key of list.keys) {
-      // list with prefix 'counter:' should only return counter:* keys,
-      // but guard against any unexpected keys just in case.
-      if (!listKeyName(key).startsWith('counter:') || listKeyName(key) === 'counter:') continue;
-      const c = await getJson<KVCounter>(listKeyName(key));
-      if (c) counters.push(c);
+  let cursor: string | undefined;
+  do {
+    const list = await WALINE_KV.list({ prefix: 'counter:', cursor });
+    if (list && list.keys) {
+      for (const key of list.keys) {
+        // list with prefix 'counter:' should only return counter:* keys,
+        // but guard against any unexpected keys just in case.
+        if (!listKeyName(key).startsWith('counter:') || listKeyName(key) === 'counter:') continue;
+        const c = await getJson<KVCounter>(listKeyName(key));
+        if (c) counters.push(c);
+      }
     }
-  }
+    cursor = list?.cursor || undefined;
+  } while (cursor);
   return counters;
 }
 
 export async function clearCounters(): Promise<void> {
-  const list = await WALINE_KV.list({ prefix: 'counter:' });
-  if (list && list.keys) {
-    for (const key of list.keys) {
-      await deleteKvKey(listKeyName(key));
+  let cursor: string | undefined;
+  do {
+    const list = await WALINE_KV.list({ prefix: 'counter:', cursor });
+    if (list && list.keys) {
+      for (const key of list.keys) {
+        await deleteKvKey(listKeyName(key));
+      }
     }
-  }
-  const idList = await WALINE_KV.list({ prefix: 'index:counter:id:' });
-  if (idList && idList.keys) {
-    for (const key of idList.keys) {
-      await deleteKvKey(listKeyName(key));
+    cursor = list?.cursor || undefined;
+  } while (cursor);
+
+  cursor = undefined;
+  do {
+    const idList = await WALINE_KV.list({ prefix: 'index:counter:id:', cursor });
+    if (idList && idList.keys) {
+      for (const key of idList.keys) {
+        await deleteKvKey(listKeyName(key));
+      }
     }
-  }
+    cursor = idList?.cursor || undefined;
+  } while (cursor);
   await WALINE_KV.put('meta:next_counter_id', '1');
 }
 
@@ -1012,11 +1518,12 @@ export async function deleteUserById(id: number): Promise<void> {
 
 export async function getUsers(options: { limit: number; offset: number }): Promise<{ data: KVUser[]; total: number }> {
   const ids = await getIds('index:users:all');
-  const users = await Promise.all(ids.map((id) => getUserById(id)));
-  const valid = users.filter((u): u is KVUser => u !== null);
-  valid.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const total = valid.length;
-  return { data: valid.slice(options.offset, options.offset + options.limit), total };
+  const pageIds = ids.slice(options.offset, options.offset + options.limit);
+  const users = await Promise.all(pageIds.map((id) => getUserById(id)));
+  return {
+    data: users.filter((u): u is KVUser => u !== null),
+    total: ids.length,
+  };
 }
 
 export async function getUserCount(): Promise<number> {
@@ -1026,17 +1533,12 @@ export async function getUserCount(): Promise<number> {
 
 export async function getTopCommenters(limit: number): Promise<{ user: KVUser; comment_count: number }[]> {
   const ids = await getIds('index:users:all');
+  const countMap = await getUserCommentCounts(ids);
   const results: { user: KVUser; comment_count: number }[] = [];
   for (const id of ids) {
     const user = await getUserById(id);
     if (!user) continue;
-    const commentIds = await getIds(`index:comments:user:${id}:recent`);
-    let count = 0;
-    if (commentIds.length > 0) {
-      const comments = await getCommentsByIds(commentIds);
-      count = comments.filter((c) => c.status === 'approved').length;
-    }
-    results.push({ user, comment_count: count });
+    results.push({ user, comment_count: countMap.get(id) || 0 });
   }
   results.sort((a, b) => b.comment_count - a.comment_count);
   return results.slice(0, limit);
@@ -1054,19 +1556,30 @@ export async function clearUsers(): Promise<void> {
     await deleteKvKey(`user:${id}`);
   }
   await deleteKvKey('index:users:all');
-  const list = await WALINE_KV.list({ prefix: 'index:user:' });
-  if (list && list.keys) {
-    for (const key of list.keys) {
-      await deleteKvKey(listKeyName(key));
+  let cursor: string | undefined;
+  do {
+    const list = await WALINE_KV.list({ prefix: 'index:user:', cursor });
+    if (list && list.keys) {
+      for (const key of list.keys) {
+        await deleteKvKey(listKeyName(key));
+      }
     }
-  }
+    cursor = list?.cursor || undefined;
+  } while (cursor);
   await WALINE_KV.put('meta:next_user_id', '1');
 }
 
 // ---------- Settings Operations ----------
 
 export async function getSetting(key: string): Promise<string | null> {
-  return WALINE_KV.get(`setting:${key}`);
+  const now = Date.now();
+  const cached = settingsCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+  const value = await WALINE_KV.get(`setting:${key}`);
+  settingsCache.set(key, { value, expiresAt: now + SETTINGS_CACHE_TTL_MS });
+  return value;
 }
 
 export async function getSettings(keys: string[]): Promise<Record<string, string>> {
@@ -1081,35 +1594,48 @@ export async function getSettings(keys: string[]): Promise<Record<string, string
 }
 
 export async function getAllSettings(): Promise<Record<string, string>> {
-  const list = await WALINE_KV.list({ prefix: 'setting:' });
   const settings: Record<string, string> = {};
-  if (list && list.keys) {
-    for (const key of list.keys) {
-      const val = await WALINE_KV.get(listKeyName(key));
-      if (val !== null) {
-        const shortKey = listKeyName(key).slice('setting:'.length);
-        settings[shortKey] = val;
+  let cursor: string | undefined;
+  do {
+    const list = await WALINE_KV.list({ prefix: 'setting:', cursor });
+    if (list && list.keys) {
+      for (const key of list.keys) {
+        const keyName = listKeyName(key);
+        const val = await WALINE_KV.get(keyName);
+        if (val !== null) {
+          const shortKey = keyName.slice('setting:'.length);
+          settings[shortKey] = val;
+          settingsCache.set(shortKey, {
+            value: val,
+            expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS,
+          });
+        }
       }
     }
-  }
+    cursor = list?.cursor || undefined;
+  } while (cursor);
   return settings;
 }
 
 export async function setSetting(key: string, value: string): Promise<void> {
   await WALINE_KV.put(`setting:${key}`, value);
+  settingsCache.set(key, { value, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS });
 }
 
 export async function setSettings(settings: Record<string, string>): Promise<void> {
-  for (const [key, value] of Object.entries(settings)) {
-    await setSetting(key, value);
-  }
+  await Promise.all(Object.entries(settings).map(([key, value]) => setSetting(key, value)));
 }
 
 export async function clearSettings(): Promise<void> {
-  const list = await WALINE_KV.list({ prefix: 'setting:' });
-  if (list && list.keys) {
-    for (const key of list.keys) {
-      await deleteKvKey(listKeyName(key));
+  let cursor: string | undefined;
+  do {
+    const list = await WALINE_KV.list({ prefix: 'setting:', cursor });
+    if (list && list.keys) {
+      for (const key of list.keys) {
+        await deleteKvKey(listKeyName(key));
+      }
     }
-  }
+    cursor = list?.cursor || undefined;
+  } while (cursor);
+  settingsCache.clear();
 }

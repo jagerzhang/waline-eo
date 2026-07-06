@@ -170,7 +170,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
               </select>
               <button class="pe-btn pe-btn-default pe-btn-sm" id="refresh-versions"><i class="layui-icon layui-icon-refresh"></i> 刷新</button>
             </div>
-            <p class="pe-desc">从 unpkg CDN 加载的 @waline/client 版本。可输入版本号（如 v3、3.3.2）或从下拉菜单选择。</p>
+            <p class="pe-desc">@waline/client 前端组件版本。可输入版本号（如 v3、3.3.2）或从下拉菜单选择。</p>
           </div>
           <div class="pe-form-item">
             <label>Worker 信息显示</label>

@@ -12,9 +12,9 @@ export function getWalinePage(): string {
 </head>
 <body>
   <div id="waline" style="max-width: 800px;margin: 0 auto;"></div>
-  <link href='//unpkg.com/@waline/client@v3/dist/waline.css' rel='stylesheet' />
+  <link href='https://registry.npmmirror.com/@waline/client/3.15.2/files/dist/waline.css' rel='stylesheet' />
   <script type="module">
-    import { init } from 'https://unpkg.com/@waline/client@v3/dist/waline.js';
+    import { init } from 'https://registry.npmmirror.com/@waline/client/3.15.2/files/dist/waline.js';
 
     const params = new URLSearchParams(location.search.slice(1));
     const waline = init({

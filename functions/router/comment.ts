@@ -19,8 +19,8 @@ import {
   getCommentCountByUrl,
   getCommentCountsByUrls,
   searchComments,
-  getUserCommentCount,
-  getMailCommentCount,
+  getUserCommentCounts,
+  getMailCommentCounts,
   getUserById,
   getStatusCommentCount,
   getAllComments,
@@ -692,23 +692,10 @@ async function computeLevels(comments: any[]): Promise<Map<string, number>> {
     comments.filter((c) => !c.user_id && c.mail).map((c) => c.mail as string),
   )];
 
-  // Batch fetch comment counts for registered users
-  const userCountMap = new Map<number, number>();
-  await Promise.all(
-    userIds.map(async (uid) => {
-      const count = await getUserCommentCount(uid);
-      userCountMap.set(uid, count);
-    }),
-  );
-
-  // Batch fetch comment counts for anonymous users (by mail)
-  const mailCountMap = new Map<string, number>();
-  await Promise.all(
-    anonMails.map(async (mail) => {
-      const count = await getMailCommentCount(mail);
-      mailCountMap.set(mail, count);
-    }),
-  );
+  const [userCountMap, mailCountMap] = await Promise.all([
+    getUserCommentCounts(userIds),
+    getMailCommentCounts(anonMails),
+  ]);
 
   // Assign levels
   for (const cmt of comments) {
@@ -716,7 +703,7 @@ async function computeLevels(comments: any[]): Promise<Map<string, number>> {
     if (!levelMap.has(key)) {
       const count = cmt.user_id
         ? (userCountMap.get(cmt.user_id) || 0)
-        : (mailCountMap.get(cmt.mail || '') || 0);
+        : (mailCountMap.get(String(cmt.mail || '').trim().toLowerCase()) || 0);
       levelMap.set(key, getLevel(count, levels));
     }
   }
@@ -929,6 +916,7 @@ async function getAdminCommentList(c: any) {
     data: {
       page,
       pageSize,
+      count: total,
       spamCount,
       waitingCount,
       totalPages: Math.ceil(total / pageSize),
