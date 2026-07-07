@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env, Variables } from './env.js';
+import { blobStorage } from './db/blob-storage.js';
 import { auth } from './middleware/auth.js';
 import { commentRoutes } from './router/comment.js';
 import { articleRoutes } from './router/article.js';
@@ -53,7 +54,7 @@ async function globalRateLimit(ip: string): Promise<boolean> {
   const key = `rl:global:${ip}`;
   const now = Math.floor(Date.now() / 1000);
   try {
-    const raw = await WALINE_KV.get(key);
+    const raw = await blobStorage.get(key);
     const record = raw ? JSON.parse(raw) : { count: 0, windowStart: now };
     if (now - record.windowStart > GLOBAL_RATE_WINDOW) {
       record.count = 1;
@@ -61,10 +62,10 @@ async function globalRateLimit(ip: string): Promise<boolean> {
     } else {
       record.count++;
     }
-    await WALINE_KV.put(key, JSON.stringify(record), { expirationTtl: GLOBAL_RATE_WINDOW * 2 });
+    await blobStorage.put(key, JSON.stringify(record), { expirationTtl: GLOBAL_RATE_WINDOW * 2 });
     return record.count <= GLOBAL_RATE_LIMIT;
   } catch {
-    // KV 不可用时放行（避免阻断正常流量）
+    // Blob storage unavailable: allow traffic to avoid blocking normal requests.
     return true;
   }
 }
@@ -190,12 +191,12 @@ app.get('/api/reset-redirect', async (c) => {
     return c.redirect('/ui?error=invalid_reset');
   }
   try {
-    const token = await WALINE_KV.get(`reset:${code}`);
+    const token = await blobStorage.get(`reset:${code}`);
     if (!token) {
       return c.redirect('/ui?error=reset_expired');
     }
     // Delete the one-time code immediately (single-use)
-    await WALINE_KV.delete(`reset:${code}`);
+    await blobStorage.delete(`reset:${code}`);
 
     const isSecure = new URL(c.req.url).protocol === 'https:';
     const cookieStr = `TOKEN=${encodeURIComponent(token)}; HttpOnly; ${isSecure ? 'Secure; ' : ''}SameSite=Lax; Path=/; Max-Age=${86400}`;

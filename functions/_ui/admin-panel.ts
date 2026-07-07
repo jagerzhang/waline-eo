@@ -305,7 +305,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     </div>
     <div style="background:var(--pe-accent-bg);border-radius:var(--pe-radius-sm);padding:16px;font-size:13px;color:var(--pe-text-secondary);line-height:1.7;">
       如果你是 <strong>管理员</strong>：登录后前往 <strong>用户管理</strong>，点击对应用户的「重置密码」按钮。<br><br>
-      如果你忘记了管理员密码：请联系服务器管理员在 KV 存储中直接修改，或重新注册（首个注册用户自动成为管理员）。
+      如果你忘记了管理员密码：请联系服务器管理员在 Pages Blob 存储中直接修改，或重新注册（首个注册用户自动成为管理员）。
     </div>
     <div style="margin-top:20px;">
       <button class="auth-btn" id="forgotBackBtn">返回登录</button>

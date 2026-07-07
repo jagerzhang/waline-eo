@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
+import { blobStorage } from '../db/blob-storage.js';
 import { verifyPassword } from '../utils/password.js';
 import { signJwt } from '../middleware/auth.js';
 import { getAvatar } from '../utils/avatar.js';
@@ -134,7 +135,7 @@ tokenRoutes.delete('/', async (c) => {
   if (token) {
     try {
       // 将 token 加入黑名单，过期时间与 JWT 一致（30天）
-      await WALINE_KV.put(`token:blacklist:${token}`, '1', { expirationTtl: 86400 * 30 });
+      await blobStorage.put(`token:blacklist:${token}`, '1', { expirationTtl: 86400 * 30 });
     } catch (e) {
       // 即使黑名单写入失败，也返回成功（不影响用户体验）
     }

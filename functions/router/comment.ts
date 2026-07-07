@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
+import { blobStorage } from '../db/blob-storage.js';
 import { getAvatar } from '../utils/avatar.js';
 import { parseUA } from '../utils/ua.js';
 import { renderMarkdown } from '../utils/markdown.js';
@@ -85,7 +86,7 @@ commentRoutes.post('/', async (c) => {
     return c.json({ errno: 1, errmsg: 'comment is required' }, 400);
   }
 
-  // Field length limits (KV value max ~25MB, Workers CPU budget is limited for markdown rendering)
+  // Field length limits (Blob object size and runtime CPU budget are limited for markdown rendering)
   if (typeof comment !== 'string' || comment.length > 65536) {
     return c.json({ errno: 1, errmsg: 'comment is too long (max 64KB)' }, 400);
   }
@@ -139,7 +140,7 @@ commentRoutes.post('/', async (c) => {
   if (!isAdmin && ipqps > 0) {
     const rateKey = ip || `noip:${body.mail || body.nick || 'anon'}`;
     const lastKey = `ipqps:${rateKey}`;
-    const lastStr = await WALINE_KV.get(lastKey);
+    const lastStr = await blobStorage.get(lastKey);
     const lastTime = lastStr ? parseInt(lastStr) : 0;
     const nowSec = Math.floor(Date.now() / 1000);
     if (lastTime && nowSec - lastTime < ipqps) {
@@ -195,12 +196,12 @@ commentRoutes.post('/', async (c) => {
   if (!isAdmin) {
     const dedupContent = `${nick}:${mail}:${url}:${comment}`;
     const dedupKey = `dedup:${simpleHash(dedupContent)}`;
-    const existing = await WALINE_KV.get(dedupKey);
+    const existing = await blobStorage.get(dedupKey);
     if (existing) {
       return c.json({ errno: 1, errmsg: '请勿重复提交相同评论' }, 400);
     }
     // Set dedup key with 10-minute expiry
-    await WALINE_KV.put(dedupKey, '1', { expirationTtl: 600 });
+    await blobStorage.put(dedupKey, '1', { expirationTtl: 600 });
   }
 
   const newComment = await createComment({
@@ -220,13 +221,13 @@ commentRoutes.post('/', async (c) => {
 
   // Record IP last comment timestamp for IPQPS
   if (ipqps > 0 && ip) {
-    await WALINE_KV.put(`ipqps:${ip}`, String(Math.floor(Date.now() / 1000)), { expirationTtl: Math.max(60, ipqps * 2) });
+    await blobStorage.put(`ipqps:${ip}`, String(Math.floor(Date.now() / 1000)), { expirationTtl: Math.max(60, ipqps * 2) });
   }
 
   // ---- Notifications (async, non-blocking) ----
   const notifyTask = async () => {
     try {
-      // Load settings from KV (fall back to env)
+      // Load settings from Blob storage (fall back to env)
       const settingKeys = [
         'smtp_service', 'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_secure',
         'sender_name', 'sender_email', 'author_email',
@@ -378,11 +379,11 @@ commentRoutes.put('/:id', async (c) => {
     // Rate limit: one like per IP per comment per 60 seconds
     const likeIp = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
     const likeKey = `like:${id}:${likeIp}`;
-    const likeRecent = await WALINE_KV.get(likeKey);
+    const likeRecent = await blobStorage.get(likeKey);
     if (likeRecent) {
       return c.json({ errno: 1, errmsg: '操作太频繁，请稍后再试' }, 429);
     }
-    await WALINE_KV.put(likeKey, '1', { expirationTtl: 60 });
+    await blobStorage.put(likeKey, '1', { expirationTtl: 60 });
     const updated = await updateComment(id, {
       like: Math.max(0, (existing.like || 0) + 1),
     });
@@ -527,7 +528,7 @@ commentRoutes.post('/re-render', async (c) => {
   // Update child comment copies in comments:rid:{rid} arrays
   for (const [rid] of dirtyRids) {
     try {
-      const raw = await WALINE_KV.get(`comments:rid:${rid}`);
+      const raw = await blobStorage.get(`comments:rid:${rid}`);
       if (!raw) continue;
       const children: KVComment[] = typeof raw === 'string' ? JSON.parse(raw) : raw as KVComment[];
       let changed = false;
@@ -544,7 +545,7 @@ commentRoutes.post('/re-render', async (c) => {
         }
       }
       if (changed) {
-        await WALINE_KV.put(`comments:rid:${rid}`, JSON.stringify(children));
+        await blobStorage.put(`comments:rid:${rid}`, JSON.stringify(children));
       }
     } catch (e) {
       console.error(`[re-render] Failed to update children of rid:${rid}`, e);
@@ -938,7 +939,7 @@ async function fetchFormatSettings(env?: Env): Promise<{ disableUA: boolean; aut
 
 async function formatComment(row: any, isAdmin = false, env?: Env, usersMap?: Map<number, any>, settings?: { disableUA: boolean; authorEmail: string }) {
   if (!row) return null;
-  // Use pre-fetched settings if provided, otherwise read from KV
+  // Use pre-fetched settings if provided, otherwise read from Blob storage
   const { disableUA, authorEmail } = settings || await fetchFormatSettings(env);
   const { browser, os } = disableUA ? { browser: '', os: '' } : parseUA(row.ua || '');
 

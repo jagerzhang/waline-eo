@@ -1,7 +1,9 @@
 /**
- * EdgeOne KV Database Layer
- * Replaces Cloudflare D1 with EdgeOne KV while preserving all Waline functionality.
+ * EdgeOne Blob Database Layer
+ * Replaces Cloudflare D1 with EdgeOne Pages Blob while preserving all Waline functionality.
  */
+import { blobStorage } from './blob-storage.js';
+import { legacyGetText } from './legacy-kv.js';
 
 // ---------- Types ----------
 
@@ -74,9 +76,8 @@ function nowIso(): string {
 
 async function getJson<T>(key: string): Promise<T | null> {
   try {
-    // EdgeOne Pages KV.get returns string | object | ArrayBuffer | ReadableStream.
-    // Always fetch as raw string/object, then parse if needed.
-    const raw = await WALINE_KV.get(key);
+    // Blob storage returns raw text by default; parse JSON only when needed.
+    const raw = await getRaw(key);
     if (!raw) return null;
     if (typeof raw === 'string') {
       return JSON.parse(raw) as T;
@@ -88,26 +89,32 @@ async function getJson<T>(key: string): Promise<T | null> {
 }
 
 async function putJson<T>(key: string, value: T): Promise<void> {
-  await WALINE_KV.put(key, JSON.stringify(value));
+  await blobStorage.put(key, JSON.stringify(value));
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function getRaw(key: string): Promise<string | null> {
+  const value = await blobStorage.get(key);
+  if (value !== null) return value;
+  return legacyGetText(key);
+}
+
 async function deleteKvKey(key: string): Promise<void> {
   if (!key) return;
 
   try {
-    await WALINE_KV.delete(key);
+    await blobStorage.delete(key);
   } catch (error) {
-    // EdgeOne KV delete can fail on existing colon/slash keys. An empty value
+    // Blob delete failures should be rare, but an empty value
     // is treated as missing by getJson/getRaw callers, so this preserves delete semantics.
-    console.warn(`[Waline KV] delete failed for "${key}", falling back to empty value: ${errorMessage(error)}`);
+    console.warn(`[Waline Blob] delete failed for "${key}", falling back to empty value: ${errorMessage(error)}`);
     try {
-      await WALINE_KV.put(key, '');
+      await blobStorage.put(key, '');
     } catch (fallbackError) {
-      console.error(`[Waline KV] delete fallback failed for "${key}": ${errorMessage(fallbackError)}`);
+      console.error(`[Waline Blob] delete fallback failed for "${key}": ${errorMessage(fallbackError)}`);
       throw error;
     }
   }
@@ -117,7 +124,7 @@ async function cleanupKvKey(key: string): Promise<void> {
   try {
     await deleteKvKey(key);
   } catch (error) {
-    console.warn(`[Waline KV] cleanup delete failed for "${key}": ${errorMessage(error)}`);
+    console.warn(`[Waline Blob] cleanup delete failed for "${key}": ${errorMessage(error)}`);
   }
 }
 
@@ -125,7 +132,7 @@ async function ignoreCleanupError(label: string, action: Promise<unknown>): Prom
   try {
     await action;
   } catch (error) {
-    console.warn(`[Waline KV] cleanup failed (${label}): ${errorMessage(error)}`);
+    console.warn(`[Waline Blob] cleanup failed (${label}): ${errorMessage(error)}`);
   }
 }
 
@@ -161,12 +168,12 @@ function listKeyName(k: any): string {
 }
 
 async function getNextId(metaKey: string): Promise<number> {
-  // EdgeOne KV has no atomic increment, so combine the stored counter with a timestamp.
-  const current = await WALINE_KV.get(metaKey);
+  // Pages Blob has no atomic increment, so combine the stored counter with a timestamp.
+  const current = await getRaw(metaKey);
   const base = current ? parseInt(current) : 1;
   const timeBasedId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
   const id = Math.max(base, timeBasedId);
-  await WALINE_KV.put(metaKey, String(id + 1));
+  await blobStorage.put(metaKey, String(id + 1));
   return id;
 }
 
@@ -205,14 +212,14 @@ function countKeyMailApproved(mail: string): string {
 }
 
 async function getNumberKey(key: string): Promise<number | null> {
-  const raw = await WALINE_KV.get(key);
+  const raw = await getRaw(key);
   if (raw === null || raw === undefined || raw === '') return null;
   const value = typeof raw === 'number' ? raw : parseInt(String(raw), 10);
   return Number.isFinite(value) ? value : null;
 }
 
 async function putNumberKey(key: string, value: number): Promise<void> {
-  await WALINE_KV.put(key, String(Math.max(0, Math.floor(value))));
+  await blobStorage.put(key, String(Math.max(0, Math.floor(value))));
 }
 
 async function incNumberKeyIfInitialized(key: string, delta: number): Promise<void> {
@@ -361,7 +368,7 @@ async function setRootStatusStickyIds(url: string, status: string, ids: number[]
 }
 
 async function isRootStatusIndexReady(url: string, status: string): Promise<boolean> {
-  return await WALINE_KV.get(rootStatusIndexedKey(url, status)) === ROOT_STATUS_INDEX_VERSION;
+  return await getRaw(rootStatusIndexedKey(url, status)) === ROOT_STATUS_INDEX_VERSION;
 }
 
 async function rebuildRootStatusIndex(url: string, status: string): Promise<void> {
@@ -389,7 +396,7 @@ async function rebuildRootStatusIndex(url: string, status: string): Promise<void
     setRootStatusPages(url, status, pages),
     putNumberKey(rootStatusCountKey(url, status), comments.length),
     setRootStatusStickyIds(url, status, stickyIds),
-    WALINE_KV.put(rootStatusIndexedKey(url, status), ROOT_STATUS_INDEX_VERSION),
+    blobStorage.put(rootStatusIndexedKey(url, status), ROOT_STATUS_INDEX_VERSION),
   ]);
 }
 
@@ -512,14 +519,14 @@ async function removeChildComment(rid: number, id: number): Promise<void> {
 // --- 评论计数 ---
 
 async function getCommentCount(url: string): Promise<number> {
-  const val = await WALINE_KV.get(`count:comments:url:${url}`);
+  const val = await getRaw(`count:comments:url:${url}`);
   return val ? parseInt(val) : 0;
 }
 
 async function incCommentCount(url: string, delta: number): Promise<void> {
   if (!url) return;
   const current = await getCommentCount(url);
-  await WALINE_KV.put(`count:comments:url:${url}`, String(Math.max(0, current + delta)));
+  await blobStorage.put(`count:comments:url:${url}`, String(Math.max(0, current + delta)));
 }
 
 // --- 最近评论索引 ---
@@ -1246,7 +1253,7 @@ export async function clearComments(): Promise<void> {
     do {
       const listOpts: any = { prefix };
       if (cursor) listOpts.cursor = cursor;
-      const list = await WALINE_KV.list(listOpts);
+      const list = await blobStorage.list(listOpts);
       if (list && list.keys && list.keys.length > 0) {
         const keys = list.keys.map((k) => listKeyName(k));
         for (let i = 0; i < keys.length; i += 50) {
@@ -1258,7 +1265,7 @@ export async function clearComments(): Promise<void> {
   }
 
   await cleanupKvKey('index:comments:recent');
-  await WALINE_KV.put('meta:next_comment_id', '1');
+  await blobStorage.put('meta:next_comment_id', '1');
 }
 
 // ---------- Counter Operations ----------
@@ -1293,7 +1300,7 @@ export async function createCounter(url: string, field: string): Promise<KVCount
   };
   (counter as any)[field] = 1;
   await putJson(`counter:${url}`, counter);
-  await WALINE_KV.put(`index:counter:id:${id}`, url);
+  await blobStorage.put(`index:counter:id:${id}`, url);
   return counter;
 }
 
@@ -1318,12 +1325,12 @@ export async function importCounter(data: Partial<KVCounter> & { url: string }):
     updatedAt: data.updatedAt || now,
   };
   await putJson(`counter:${data.url}`, counter);
-  await WALINE_KV.put(`index:counter:id:${id}`, data.url);
+  await blobStorage.put(`index:counter:id:${id}`, data.url);
   return counter;
 }
 
 export async function getCounterById(id: number): Promise<KVCounter | null> {
-  const url = await WALINE_KV.get(`index:counter:id:${id}`);
+  const url = await getRaw(`index:counter:id:${id}`);
   if (!url) return null;
   return getCounterByUrl(url);
 }
@@ -1341,7 +1348,7 @@ export async function getAllCounters(): Promise<KVCounter[]> {
   const counters: KVCounter[] = [];
   let cursor: string | undefined;
   do {
-    const list = await WALINE_KV.list({ prefix: 'counter:', cursor });
+    const list = await blobStorage.list({ prefix: 'counter:', cursor });
     if (list && list.keys) {
       for (const key of list.keys) {
         // list with prefix 'counter:' should only return counter:* keys,
@@ -1359,7 +1366,7 @@ export async function getAllCounters(): Promise<KVCounter[]> {
 export async function clearCounters(): Promise<void> {
   let cursor: string | undefined;
   do {
-    const list = await WALINE_KV.list({ prefix: 'counter:', cursor });
+    const list = await blobStorage.list({ prefix: 'counter:', cursor });
     if (list && list.keys) {
       for (const key of list.keys) {
         await deleteKvKey(listKeyName(key));
@@ -1370,7 +1377,7 @@ export async function clearCounters(): Promise<void> {
 
   cursor = undefined;
   do {
-    const idList = await WALINE_KV.list({ prefix: 'index:counter:id:', cursor });
+    const idList = await blobStorage.list({ prefix: 'index:counter:id:', cursor });
     if (idList && idList.keys) {
       for (const key of idList.keys) {
         await deleteKvKey(listKeyName(key));
@@ -1378,7 +1385,7 @@ export async function clearCounters(): Promise<void> {
     }
     cursor = idList?.cursor || undefined;
   } while (cursor);
-  await WALINE_KV.put('meta:next_counter_id', '1');
+  await blobStorage.put('meta:next_counter_id', '1');
 }
 
 // ---------- User Operations ----------
@@ -1412,25 +1419,25 @@ export async function createUser(data: Partial<KVUser>): Promise<KVUser> {
     addId('index:users:all', id, true),
   ];
   if (user.email) {
-    indexOps.push(WALINE_KV.put(`index:user:email:${user.email}`, String(id)));
+    indexOps.push(blobStorage.put(`index:user:email:${user.email}`, String(id)));
   }
   if (user.github) {
-    indexOps.push(WALINE_KV.put(`index:user:social:github:${user.github}`, String(id)));
+    indexOps.push(blobStorage.put(`index:user:social:github:${user.github}`, String(id)));
   }
   if (user.twitter) {
-    indexOps.push(WALINE_KV.put(`index:user:social:twitter:${user.twitter}`, String(id)));
+    indexOps.push(blobStorage.put(`index:user:social:twitter:${user.twitter}`, String(id)));
   }
   if (user.facebook) {
-    indexOps.push(WALINE_KV.put(`index:user:social:facebook:${user.facebook}`, String(id)));
+    indexOps.push(blobStorage.put(`index:user:social:facebook:${user.facebook}`, String(id)));
   }
   if (user.google) {
-    indexOps.push(WALINE_KV.put(`index:user:social:google:${user.google}`, String(id)));
+    indexOps.push(blobStorage.put(`index:user:social:google:${user.google}`, String(id)));
   }
   if (user.weibo) {
-    indexOps.push(WALINE_KV.put(`index:user:social:weibo:${user.weibo}`, String(id)));
+    indexOps.push(blobStorage.put(`index:user:social:weibo:${user.weibo}`, String(id)));
   }
   if (user.qq) {
-    indexOps.push(WALINE_KV.put(`index:user:social:qq:${user.qq}`, String(id)));
+    indexOps.push(blobStorage.put(`index:user:social:qq:${user.qq}`, String(id)));
   }
   await Promise.all(indexOps);
 
@@ -1442,13 +1449,13 @@ export async function getUserById(id: number): Promise<KVUser | null> {
 }
 
 export async function getUserByEmail(email: string): Promise<KVUser | null> {
-  const idStr = await WALINE_KV.get(`index:user:email:${email}`);
+  const idStr = await getRaw(`index:user:email:${email}`);
   if (!idStr) return null;
   return getUserById(parseInt(idStr));
 }
 
 export async function getUserBySocial(field: string, value: string): Promise<KVUser | null> {
-  const idStr = await WALINE_KV.get(`index:user:social:${field}:${value}`);
+  const idStr = await getRaw(`index:user:social:${field}:${value}`);
   if (!idStr) return null;
   return getUserById(parseInt(idStr));
 }
@@ -1471,31 +1478,31 @@ export async function updateUser(id: number, data: Partial<KVUser>): Promise<KVU
 
   if (data.email !== undefined && data.email !== oldEmail) {
     if (oldEmail) await deleteKvKey(`index:user:email:${oldEmail}`);
-    if (data.email) await WALINE_KV.put(`index:user:email:${data.email}`, String(id));
+    if (data.email) await blobStorage.put(`index:user:email:${data.email}`, String(id));
   }
   if (data.github !== undefined && data.github !== oldGithub) {
     if (oldGithub) await deleteKvKey(`index:user:social:github:${oldGithub}`);
-    if (data.github) await WALINE_KV.put(`index:user:social:github:${data.github}`, String(id));
+    if (data.github) await blobStorage.put(`index:user:social:github:${data.github}`, String(id));
   }
   if (data.twitter !== undefined && data.twitter !== oldTwitter) {
     if (oldTwitter) await deleteKvKey(`index:user:social:twitter:${oldTwitter}`);
-    if (data.twitter) await WALINE_KV.put(`index:user:social:twitter:${data.twitter}`, String(id));
+    if (data.twitter) await blobStorage.put(`index:user:social:twitter:${data.twitter}`, String(id));
   }
   if (data.facebook !== undefined && data.facebook !== oldFacebook) {
     if (oldFacebook) await deleteKvKey(`index:user:social:facebook:${oldFacebook}`);
-    if (data.facebook) await WALINE_KV.put(`index:user:social:facebook:${data.facebook}`, String(id));
+    if (data.facebook) await blobStorage.put(`index:user:social:facebook:${data.facebook}`, String(id));
   }
   if (data.google !== undefined && data.google !== oldGoogle) {
     if (oldGoogle) await deleteKvKey(`index:user:social:google:${oldGoogle}`);
-    if (data.google) await WALINE_KV.put(`index:user:social:google:${data.google}`, String(id));
+    if (data.google) await blobStorage.put(`index:user:social:google:${data.google}`, String(id));
   }
   if (data.weibo !== undefined && data.weibo !== oldWeibo) {
     if (oldWeibo) await deleteKvKey(`index:user:social:weibo:${oldWeibo}`);
-    if (data.weibo) await WALINE_KV.put(`index:user:social:weibo:${data.weibo}`, String(id));
+    if (data.weibo) await blobStorage.put(`index:user:social:weibo:${data.weibo}`, String(id));
   }
   if (data.qq !== undefined && data.qq !== oldQq) {
     if (oldQq) await deleteKvKey(`index:user:social:qq:${oldQq}`);
-    if (data.qq) await WALINE_KV.put(`index:user:social:qq:${data.qq}`, String(id));
+    if (data.qq) await blobStorage.put(`index:user:social:qq:${data.qq}`, String(id));
   }
 
   return user;
@@ -1558,7 +1565,7 @@ export async function clearUsers(): Promise<void> {
   await deleteKvKey('index:users:all');
   let cursor: string | undefined;
   do {
-    const list = await WALINE_KV.list({ prefix: 'index:user:', cursor });
+    const list = await blobStorage.list({ prefix: 'index:user:', cursor });
     if (list && list.keys) {
       for (const key of list.keys) {
         await deleteKvKey(listKeyName(key));
@@ -1566,7 +1573,7 @@ export async function clearUsers(): Promise<void> {
     }
     cursor = list?.cursor || undefined;
   } while (cursor);
-  await WALINE_KV.put('meta:next_user_id', '1');
+  await blobStorage.put('meta:next_user_id', '1');
 }
 
 // ---------- Settings Operations ----------
@@ -1577,7 +1584,7 @@ export async function getSetting(key: string): Promise<string | null> {
   if (cached && cached.expiresAt > now) {
     return cached.value;
   }
-  const value = await WALINE_KV.get(`setting:${key}`);
+  const value = await getRaw(`setting:${key}`);
   settingsCache.set(key, { value, expiresAt: now + SETTINGS_CACHE_TTL_MS });
   return value;
 }
@@ -1597,11 +1604,11 @@ export async function getAllSettings(): Promise<Record<string, string>> {
   const settings: Record<string, string> = {};
   let cursor: string | undefined;
   do {
-    const list = await WALINE_KV.list({ prefix: 'setting:', cursor });
+    const list = await blobStorage.list({ prefix: 'setting:', cursor });
     if (list && list.keys) {
       for (const key of list.keys) {
         const keyName = listKeyName(key);
-        const val = await WALINE_KV.get(keyName);
+        const val = await getRaw(keyName);
         if (val !== null) {
           const shortKey = keyName.slice('setting:'.length);
           settings[shortKey] = val;
@@ -1618,7 +1625,7 @@ export async function getAllSettings(): Promise<Record<string, string>> {
 }
 
 export async function setSetting(key: string, value: string): Promise<void> {
-  await WALINE_KV.put(`setting:${key}`, value);
+  await blobStorage.put(`setting:${key}`, value);
   settingsCache.set(key, { value, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS });
 }
 
@@ -1629,7 +1636,7 @@ export async function setSettings(settings: Record<string, string>): Promise<voi
 export async function clearSettings(): Promise<void> {
   let cursor: string | undefined;
   do {
-    const list = await WALINE_KV.list({ prefix: 'setting:', cursor });
+    const list = await blobStorage.list({ prefix: 'setting:', cursor });
     if (list && list.keys) {
       for (const key of list.keys) {
         await deleteKvKey(listKeyName(key));

@@ -1,7 +1,7 @@
 {
   "name": "waline-on-edgeone",
   "version": "1.0.0",
-  "description": "Waline-compatible comment system backend running on EdgeOne Edge Functions with KV",
+  "description": "Waline-compatible comment system backend running on EdgeOne Edge Functions with Pages Blob",
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit",
@@ -16,11 +16,12 @@
     "waline",
     "edgeone",
     "comment-system",
-    "kv"
+    "blob"
   ],
   "author": "wuyilingwei",
   "license": "MIT",
   "dependencies": {
+    "@edgeone/pages-blob": "^0.0.14",
     "bcryptjs": "^3.0.3",
     "hono": "^4.12.9"
   },

@@ -7,6 +7,7 @@
  */
 import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
+import { hasKvToBlobMigrationMarker, migrateLegacyKvToBlob } from '../db/kv-to-blob.js';
 import {
   getAllComments,
   getAllCounters,
@@ -30,7 +31,7 @@ const VALID_COUNTER_FIELDS = new Set([
   'reaction4', 'reaction5', 'reaction6', 'reaction7', 'reaction8',
 ]);
 
-// Table name mapping: Waline logical name -> KV table name
+// Table name mapping: Waline logical name -> internal storage table name
 const TABLE_MAP: Record<string, string> = {
   Comment: 'wl_Comment',
   Counter: 'wl_Counter',
@@ -61,11 +62,56 @@ dbRoutes.use('*', async (c, next) => {
   await next();
 });
 
+async function autoMigrateLegacyKv(env: Env): Promise<void> {
+  if (await hasKvToBlobMigrationMarker()) return;
+
+  const result = await migrateLegacyKvToBlob(env, { overwrite: false });
+  if (!result.available || result.scanned === 0) return;
+
+  if (result.failed > 0) {
+    const firstError = result.errors[0];
+    const detail = firstError ? ` First failed key: ${firstError.key}: ${firstError.message}` : '';
+    throw new Error(`KV to Blob migration failed for ${result.failed} key(s).${detail}`);
+  }
+}
+
+/**
+ * POST /api/db/migrate-kv-to-blob - Copy legacy WALINE_KV data into Pages Blob
+ */
+dbRoutes.post('/migrate-kv-to-blob', async (c) => {
+  const overwrite = c.req.query('overwrite') === '1';
+  const result = await migrateLegacyKvToBlob(c.env, { overwrite });
+
+  if (!result.available) {
+    return c.json({
+      errno: 1,
+      errmsg: '未检测到旧 WALINE_KV 绑定，无法自动迁移。请先保留旧 KV 绑定再部署迁移版本。',
+      data: result,
+    }, 400);
+  }
+
+  if (result.failed > 0) {
+    return c.json({
+      errno: 1,
+      errmsg: `KV 转 Blob 未完全成功，失败 ${result.failed} 个 key，请查看 data.errors。`,
+      data: result,
+    }, 500);
+  }
+
+  return c.json({
+    errno: 0,
+    errmsg: `KV 转 Blob 完成：复制 ${result.copied} 个，跳过已存在 ${result.skippedExisting} 个。`,
+    data: result,
+  });
+});
+
 /**
  * GET /api/db - Export all tables in Waline format
  * Admin panel's request() unwraps: { __version, ...result.data }
  */
 dbRoutes.get('/', async (c) => {
+  await autoMigrateLegacyKv(c.env);
+
   const exportData: any = {
     __version: '1.31.13',
     type: 'waline',

@@ -1,6 +1,6 @@
 # Waline On EdgeOne
 
-基于 [Hono](https://hono.dev/) 框架构建的 **Waline** 评论系统后端，专为 **EdgeOne Pages** 边缘计算平台优化，使用 **EdgeOne KV** 作为数据持久化存储。
+基于 [Hono](https://hono.dev/) 框架构建的 **Waline** 评论系统后端，专为 **EdgeOne Pages** 边缘计算平台优化，使用 **EdgeOne Pages Blob** 作为数据持久化存储。
 
 完全兼容 `@waline/client` v3 前端与 `@waline/admin` 管理后台，同时提供独立的 EdgeOne 扩展设置面板，将大量原需环境变量的配置项迁移至 Web 后台，降低部署后的维护成本。
 
@@ -18,7 +18,7 @@
 - RSS 订阅：按页面路径或用户筛选输出 RSS 2.0  Feed
 - Markdown 渲染：评论内容支持 Markdown 语法，实时渲染为 HTML
 - XSS 过滤：内置安全的 Markdown 处理策略
-- 大规模数据支持：采用 KV 分页索引设计，可稳定支撑 10 万级评论数据量
+- 大规模数据支持：采用 Blob 分页索引设计，可稳定支撑 10 万级评论数据量
 
 ### 用户与认证
 
@@ -80,17 +80,18 @@
 
 在 EdgeOne 控制台中：
 
-1. 创建一个 **KV 命名空间**，用于存储评论、用户、计数器及配置数据
+1. 确认 EdgeOne Pages 项目已启用 Blob 存储能力，系统会使用名为 `waline` 的 Blob Store 保存评论、用户、计数器及配置数据
 2. 创建 EdgeOne Pages 项目，将本仓库代码作为函数源码部署
 
 ### 2. 必须的环境变量
 
-仅需在 EdgeOne 控制台配置以下 2 个环境变量，其余所有设置均可在部署后通过后台管理：
+仅需在 EdgeOne 控制台配置以下环境变量，其余所有设置均可在部署后通过后台管理：
 
 | 变量名 | 说明 | 必填 |
 |---|---|---|
-| `WALINE_KV` | EdgeOne KV 命名空间绑定名 | 是 |
 | `JWT_SECRET` | JWT 签名密钥，请设置足够复杂的随机字符串 | 是 |
+
+> 从旧版 EdgeOne KV 升级到 Pages Blob 时，请暂时保留旧的 `WALINE_KV` 绑定。管理员导出数据或调用 `/api/db/migrate-kv-to-blob` 时会自动把旧 KV 数据复制到 Blob；确认迁移成功后再删除旧 KV 绑定。
 
 > 旧版中需要配置的 `SITE_NAME`、`SITE_URL`、`AUTHOR_EMAIL`、`IPQPS`、`COMMENT_AUDIT`、`AKISMET_KEY`、`DISABLE_REGION`、`DISABLE_USERAGENT` 等变量，现已全部迁移至后台 `/ui/worker-setting` 页面，部署后登录管理员账号即可可视化配置。
 
@@ -125,9 +126,9 @@
 
 ---
 
-## KV 数据存储结构
+## Blob 数据存储结构
 
-EdgeOne KV 中使用的键前缀说明：
+EdgeOne Pages Blob Store `waline` 中使用的键前缀说明：
 
 | 前缀 | 说明 |
 |---|---|
@@ -149,7 +150,7 @@ EdgeOne KV 中使用的键前缀说明：
 
 - [Hono](https://hono.dev/) — 轻量级 Web 框架
 - EdgeOne Pages V8 Runtime — 边缘计算运行时
-- EdgeOne KV — 分布式键值存储
+- EdgeOne Pages Blob — 持久化对象存储
 - TypeScript — 全栈类型安全
 
 ---
