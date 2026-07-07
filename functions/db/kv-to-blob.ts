@@ -1,5 +1,10 @@
 import { blobStorage } from './blob-storage.js';
-import { getLegacyKV, legacyListKeyName, type LegacyKVNamespace } from './legacy-kv.js';
+import {
+  getLegacyKV,
+  legacyListKeyName,
+  legacyListPage,
+  type LegacyKVNamespace,
+} from './legacy-kv.js';
 
 export interface KvToBlobMigrationResult {
   available: boolean;
@@ -27,6 +32,12 @@ const MIGRATION_PREFIXES = [
 ];
 
 const SKIP_KEYS = new Set([MIGRATION_MARKER_KEY]);
+const COPY_CONCURRENCY = 16;
+const SCHEDULE_CHECK_TTL_MS = 60_000;
+
+let activeMigration: Promise<KvToBlobMigrationResult> | null = null;
+let migrationMarkerCached = false;
+let lastScheduleCheckAt = 0;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -54,11 +65,20 @@ async function readLegacyValue(kv: LegacyKVNamespace, key: string): Promise<stri
   return text ?? '';
 }
 
-export async function hasKvToBlobMigrationMarker(): Promise<boolean> {
-  return (await blobStorage.get(MIGRATION_MARKER_KEY).catch(() => null)) !== null;
+async function runInChunks<T>(items: T[], size: number, worker: (item: T) => Promise<void>): Promise<void> {
+  for (let i = 0; i < items.length; i += size) {
+    await Promise.all(items.slice(i, i + size).map((item) => worker(item)));
+  }
 }
 
-export async function migrateLegacyKvToBlob(
+export async function hasKvToBlobMigrationMarker(): Promise<boolean> {
+  if (migrationMarkerCached) return true;
+  const exists = (await blobStorage.get(MIGRATION_MARKER_KEY).catch(() => null)) !== null;
+  if (exists) migrationMarkerCached = true;
+  return exists;
+}
+
+async function runLegacyKvToBlobMigration(
   env?: unknown,
   options?: { overwrite?: boolean },
 ): Promise<KvToBlobMigrationResult> {
@@ -83,18 +103,18 @@ export async function migrateLegacyKvToBlob(
       const listOptions: { prefix: string; limit: number; cursor?: string } = { prefix, limit: 1000 };
       if (cursor) listOptions.cursor = cursor;
 
-      const list = await kv.list(listOptions);
+      const list = await legacyListPage(kv, listOptions);
       const keys = list.keys || [];
 
-      for (const item of keys) {
+      await runInChunks(keys, COPY_CONCURRENCY, async (item) => {
         const key = legacyListKeyName(item);
-        if (!key || seen.has(key)) continue;
+        if (!key || seen.has(key)) return;
         seen.add(key);
         result.scanned++;
 
         if (!isMigratableKey(key)) {
           result.skippedInvalid++;
-          continue;
+          return;
         }
 
         try {
@@ -102,7 +122,7 @@ export async function migrateLegacyKvToBlob(
             const existing = await blobStorage.get(key, { type: 'arrayBuffer' });
             if (existing !== null) {
               result.skippedExisting++;
-              continue;
+              return;
             }
           }
 
@@ -115,7 +135,7 @@ export async function migrateLegacyKvToBlob(
             result.errors.push({ key, message: errorMessage(error) });
           }
         }
-      }
+      });
 
       cursor = list.complete === false && list.cursor ? list.cursor : undefined;
     } while (cursor);
@@ -130,7 +150,51 @@ export async function migrateLegacyKvToBlob(
       skippedInvalid: result.skippedInvalid,
     }));
     result.markerWritten = true;
+    migrationMarkerCached = true;
   }
 
   return result;
+}
+
+export async function migrateLegacyKvToBlob(
+  env?: unknown,
+  options?: { overwrite?: boolean },
+): Promise<KvToBlobMigrationResult> {
+  if (!options?.overwrite && activeMigration) return activeMigration;
+
+  const migration = runLegacyKvToBlobMigration(env, options);
+  if (!options?.overwrite) {
+    activeMigration = migration.finally(() => {
+      activeMigration = null;
+    });
+    return activeMigration;
+  }
+
+  return migration;
+}
+
+export async function scheduleLegacyKvToBlobMigration(
+  env?: unknown,
+  waitUntil?: (promise: Promise<unknown>) => void,
+): Promise<boolean> {
+  if (migrationMarkerCached || !getLegacyKV(env)) return false;
+  if (activeMigration) {
+    waitUntil?.(activeMigration.then(() => undefined).catch((error) => {
+      console.error(`[Waline Blob] background KV migration failed: ${errorMessage(error)}`);
+    }));
+    return true;
+  }
+
+  const now = Date.now();
+  if (now - lastScheduleCheckAt < SCHEDULE_CHECK_TTL_MS) return false;
+  lastScheduleCheckAt = now;
+
+  if (await hasKvToBlobMigrationMarker()) return false;
+
+  const migration = migrateLegacyKvToBlob(env, { overwrite: false });
+  const background = migration.then(() => undefined).catch((error) => {
+    console.error(`[Waline Blob] background KV migration failed: ${errorMessage(error)}`);
+  });
+  waitUntil?.(background);
+  return true;
 }

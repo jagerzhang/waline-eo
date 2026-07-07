@@ -17,6 +17,17 @@ export interface LegacyKVNamespace {
   list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<LegacyKVListResult>;
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isUndefinedCursorError(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase();
+  return message.includes('cursor')
+    && message.includes('undefined')
+    && message.includes('string');
+}
+
 function isLegacyKV(value: unknown): value is LegacyKVNamespace {
   return !!value
     && typeof (value as { get?: unknown }).get === 'function'
@@ -35,6 +46,25 @@ export function getLegacyKV(env?: unknown): LegacyKVNamespace | null {
 
 export function legacyListKeyName(key: string | { key?: string; name?: string }): string {
   return typeof key === 'string' ? key : key.name || key.key || '';
+}
+
+export async function legacyListPage(
+  kv: LegacyKVNamespace,
+  options?: { prefix?: string; limit?: number; cursor?: string },
+): Promise<LegacyKVListResult> {
+  const cleanOptions: { prefix?: string; limit?: number; cursor?: string } = {};
+  if (options?.prefix !== undefined) cleanOptions.prefix = options.prefix;
+  if (options?.limit !== undefined) cleanOptions.limit = options.limit;
+  if (typeof options?.cursor === 'string' && options.cursor !== '') cleanOptions.cursor = options.cursor;
+
+  try {
+    return await kv.list(cleanOptions);
+  } catch (error) {
+    if (cleanOptions.cursor === undefined && isUndefinedCursorError(error)) {
+      return kv.list({ ...cleanOptions, cursor: '' });
+    }
+    throw error;
+  }
 }
 
 export async function legacyGetText(key: string): Promise<string | null> {
