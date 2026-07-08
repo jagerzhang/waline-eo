@@ -8,6 +8,12 @@ import { sendMail, buildMailSubject, buildMailHtml } from '../utils/mail.js';
 import { sendPushPlus } from '../utils/pushplus.js';
 import { validateGeetest } from '../utils/geetest.js';
 import {
+  getCommentListVersion,
+  getPublicCommentListCache,
+  hasCommentCacheAuthSignal,
+  setPublicCommentListCache,
+} from '../db/comment-cache.js';
+import {
   createComment,
   getCommentById,
   updateComment,
@@ -489,9 +495,6 @@ commentRoutes.post('/re-render', async (c) => {
   let total = 0;
   let fixed = 0;
 
-  // Track which rid groups need child array updates
-  const dirtyRids = new Map<number, KVComment[]>();
-
   for (const status of statuses) {
     const { data } = await searchComments({ status, limit: 500, offset: 0 });
     for (const comment of data) {
@@ -513,41 +516,8 @@ commentRoutes.post('/re-render', async (c) => {
         comment.comment = reRendered;
         await updateComment(comment.id, { comment: reRendered });
 
-        // If this is a child comment, mark its rid group as dirty
-        if (comment.rid !== null) {
-          if (!dirtyRids.has(comment.rid)) {
-            dirtyRids.set(comment.rid, []);
-          }
-        }
         fixed++;
       }
-    }
-  }
-
-  // Update child comment copies in comments:rid:{rid} arrays
-  for (const [rid] of dirtyRids) {
-    try {
-      const raw = await WALINE_KV.get(`comments:rid:${rid}`);
-      if (!raw) continue;
-      const children: KVComment[] = typeof raw === 'string' ? JSON.parse(raw) : raw as KVComment[];
-      let changed = false;
-      for (const child of children) {
-        if (!child.orig) continue;
-        const currentHtml = child.comment || '';
-        if (currentHtml.includes('data:image')) continue;
-        const hasUnrenderedEmoji = currentHtml.includes('&lt;img') && currentHtml.includes('wl-emoji');
-        if (!hasUnrenderedEmoji) continue;
-        const reRendered = renderMarkdown(child.orig);
-        if (reRendered !== currentHtml) {
-          child.comment = reRendered;
-          changed = true;
-        }
-      }
-      if (changed) {
-        await WALINE_KV.put(`comments:rid:${rid}`, JSON.stringify(children));
-      }
-    } catch (e) {
-      console.error(`[re-render] Failed to update children of rid:${rid}`, e);
     }
   }
 
@@ -725,6 +695,12 @@ async function getCommentList(c: any) {
   const page = Math.max(1, parseInt(c.req.query('page') || '1') || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt(c.req.query('pageSize') || '10') || 10));
   const sortBy = c.req.query('sortBy') || 'insertedAt_desc';
+  const cacheAuthSignal = hasCommentCacheAuthSignal({
+    authorization: c.req.header('Authorization'),
+    cookie: c.req.header('cookie'),
+    token: c.req.query('token'),
+  });
+  const canUsePublicCache = !userInfo && !cacheAuthSignal;
 
   const orderMap: Record<string, string> = {
     insertedAt_desc: 'insertedAt DESC',
@@ -733,6 +709,19 @@ async function getCommentList(c: any) {
   };
   const orderBy = orderMap[sortBy] || 'insertedAt DESC';
   const offset = (page - 1) * pageSize;
+  const cacheVersion = canUsePublicCache ? await getCommentListVersion(path) : 0;
+  const cacheParams = canUsePublicCache
+    ? { path, page, pageSize, sortBy, version: cacheVersion }
+    : null;
+
+  if (cacheParams) {
+    const cached = await getPublicCommentListCache<Record<string, unknown>>(cacheParams);
+    if (cached) {
+      c.header('Cache-Control', 'public, max-age=30');
+      c.header('X-Waline-Cache', 'HIT');
+      return c.json(cached);
+    }
+  }
 
   // Get root comments (sticky first, only approved for public view)
   const { comments: rootComments, total: totalCount } = await getRootCommentsByUrl(path, {
@@ -740,6 +729,7 @@ async function getCommentList(c: any) {
     limit: pageSize,
     offset,
     status: 'approved',
+    allowIndexRebuild: !canUsePublicCache,
   });
 
   // If logged-in non-admin user, also fetch their own waiting root comments
@@ -830,7 +820,7 @@ async function getCommentList(c: any) {
     }),
   );
 
-  return c.json({
+  const response = {
     errno: 0,
     errmsg: '',
     data: {
@@ -840,7 +830,15 @@ async function getCommentList(c: any) {
       totalPages: Math.ceil(totalCount / pageSize),
       data,
     },
-  });
+  };
+
+  if (cacheParams) {
+    await setPublicCommentListCache(cacheParams, response);
+    c.header('Cache-Control', 'public, max-age=30');
+    c.header('X-Waline-Cache', 'MISS');
+  }
+
+  return c.json(response);
 }
 
 async function getRecentCommentsHandler(c: any) {

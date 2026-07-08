@@ -1100,6 +1100,12 @@ const STATIC_TAIL = `;
           '<button class="pe-btn pe-btn-warning" id="importBtn" disabled><i class="layui-icon layui-icon-transfer"></i> 开始导入</button>' +
         '</div>' +
         '<div id="importLog" class="import-log" style="display:none;"></div>' +
+      '</div>' +
+      '<div class="pe-card">' +
+        '<div class="pe-card-title">评论性能维护</div>' +
+        '<p style="font-size:13px;color:var(--pe-text-secondary);margin:0 0 14px;">从 comment 源数据重建文章评论索引、状态索引、子评论索引和评论缓存版本。导入旧备份后建议执行一次。</p>' +
+        '<button class="pe-btn pe-btn-primary" id="rebuildCommentIndexesBtn"><i class="layui-icon layui-icon-refresh"></i> 重建评论索引</button>' +
+        '<span id="rebuildCommentIndexesStatus" style="margin-left:12px;font-size:13px;color:var(--pe-text-muted);"></span>' +
       '</div>';
 
     /* ---- 导出 ---- */
@@ -1129,6 +1135,29 @@ const STATIC_TAIL = `;
     });
 
     /* ---- 文件选择 ---- */
+    c.querySelector('#rebuildCommentIndexesBtn').addEventListener('click', function() {
+      if (!confirm('确认从 comment 源数据重建评论索引？数据量较大时可能需要等待一会儿。')) return;
+      var btn = this;
+      var status = c.querySelector('#rebuildCommentIndexesStatus');
+      btn.disabled = true;
+      status.textContent = '正在重建...';
+      status.style.color = 'var(--pe-text-muted)';
+      api('/db/rebuild-comment-indexes', { method: 'POST' }).then(function(d) {
+        if (d.errno !== 0) {
+          status.textContent = d.errmsg || '重建失败';
+          status.style.color = 'var(--pe-danger)';
+        } else {
+          status.textContent = d.errmsg || '重建完成';
+          status.style.color = 'var(--pe-success)';
+        }
+        btn.disabled = false;
+      }).catch(function(e) {
+        status.textContent = '请求失败：' + (e.message || '');
+        status.style.color = 'var(--pe-danger)';
+        btn.disabled = false;
+      });
+    });
+
     var fileInput  = c.querySelector('#importFile');
     var importBtn  = c.querySelector('#importBtn');
     var fileLabelText = c.querySelector('#fileLabelText');
@@ -1175,8 +1204,20 @@ const STATIC_TAIL = `;
         /* 串行处理：清空 → 逐条插入 */
         function processTable(idx) {
           if (idx >= tables.length) {
-            log('\\n✅ 导入完成！成功 ' + done + ' 条，失败 ' + fail + ' 条', fail ? 'err' : 'ok');
-            importBtn.disabled = false;
+            log('\\n导入写入完成，正在重建评论索引...', 'info');
+            api('/db/rebuild-comment-indexes', { method: 'POST' }).then(function(r) {
+              if (r.errno === 0) {
+                log(r.errmsg || '评论索引重建完成', 'ok');
+              } else {
+                log('评论索引重建失败：' + (r.errmsg || 'unknown'), 'err');
+              }
+              log('导入完成：成功 ' + done + ' 条，失败 ' + fail + ' 条', fail ? 'err' : 'ok');
+              importBtn.disabled = false;
+            }).catch(function(e) {
+              log('评论索引重建请求失败：' + (e.message || ''), 'err');
+              log('导入完成：成功 ' + done + ' 条，失败 ' + fail + ' 条', fail ? 'err' : 'ok');
+              importBtn.disabled = false;
+            });
             return;
           }
           var t = tables[idx];

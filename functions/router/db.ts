@@ -21,6 +21,7 @@ import {
   updateUser,
   updateCounter,
   getCounterById,
+  rebuildCommentIndexes,
 } from '../db/kv-store.js';
 
 export const dbRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -141,6 +142,18 @@ dbRoutes.get('/', async (c) => {
   }));
 
   return c.json({ errno: 0, data: exportData });
+});
+
+/**
+ * POST /api/db/rebuild-comment-indexes - Rebuild KV derived indexes from comment:* source rows
+ */
+dbRoutes.post('/rebuild-comment-indexes', async (c) => {
+  const result = await rebuildCommentIndexes();
+  return c.json({
+    errno: 0,
+    errmsg: `评论索引重建完成：扫描 ${result.comments} 条评论，文章 ${result.urls} 篇，子评论楼层 ${result.childThreads} 组。`,
+    data: result,
+  });
 });
 
 /**
