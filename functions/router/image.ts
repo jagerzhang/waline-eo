@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
-import { blobStorage } from '../db/blob-storage.js';
 import { getSetting } from './settings.js';
 import { textBufferSource } from '../utils/crypto-source.js';
 
@@ -18,10 +17,6 @@ const EXT_BY_TYPE: Record<string, string> = {
   'image/webp': 'webp',
   'image/avif': 'avif',
 };
-
-function normalizeUploadType(value: string | null): 'blob' | 'qiniu' | 'upyun' {
-  return value === 'qiniu' || value === 'upyun' ? value : 'blob';
-}
 
 /**
  * POST /api/image - Upload image (login required)
@@ -53,7 +48,7 @@ imageRoutes.post('/', async (c) => {
     return c.json({ errno: 1, errmsg: '文件大小不能超过 5MB' }, 400);
   }
 
-  const uploadType = normalizeUploadType(await getSetting('image_upload_type').catch(() => null));
+  const uploadType = (await getSetting('image_upload_type').catch(() => null)) || 'kv';
 
   try {
     let url: string;
@@ -63,8 +58,8 @@ imageRoutes.post('/', async (c) => {
     } else if (uploadType === 'upyun') {
       url = await uploadToUpyun(file, c.env);
     } else {
-      // Default: Blob storage
-      url = await uploadToBlob(file, c.req.url);
+      // Default: KV storage
+      url = await uploadToKV(file, c.req.url);
     }
 
     return c.json({ errno: 0, errmsg: '', url });
@@ -75,7 +70,7 @@ imageRoutes.post('/', async (c) => {
 });
 
 /**
- * GET /api/image/:key - Retrieve image from Blob storage
+ * GET /api/image/:key - Retrieve image from KV storage
  */
 imageRoutes.get('/:key', async (c) => {
   const key = c.req.param('key');
@@ -83,39 +78,12 @@ imageRoutes.get('/:key', async (c) => {
     return c.json({ errno: 1, errmsg: 'Missing key' }, 400);
   }
 
-  const metaRaw = await blobStorage.get(`img-meta:${key}`);
-  if (typeof metaRaw === 'string') {
-    let meta: { mime?: string };
-    try {
-      meta = JSON.parse(metaRaw) as { mime?: string };
-    } catch {
-      return c.json({ errno: 1, errmsg: 'Invalid image metadata' }, 500);
-    }
-    const mime = meta.mime || '';
-    if (!ALLOWED_TYPES.includes(mime)) {
-      return c.json({ errno: 1, errmsg: 'Unsupported image type' }, 415);
-    }
-
-    const bytes = await blobStorage.get(`img:${key}`, { type: 'arrayBuffer' }) as ArrayBuffer | null;
-    if (!bytes) {
-      return c.json({ errno: 1, errmsg: 'Image not found' }, 404);
-    }
-
-    return new Response(bytes, {
-      headers: {
-        'Content-Type': mime,
-        'Cache-Control': 'public, max-age=31536000',
-        'X-Content-Type-Options': 'nosniff',
-      },
-    });
-  }
-
-  const raw = await blobStorage.get(`img:${key}`);
-  if (!raw || typeof raw !== 'string') {
+  const raw = await WALINE_KV.get(`img:${key}`);
+  if (!raw) {
     return c.json({ errno: 1, errmsg: 'Image not found' }, 404);
   }
 
-  // Legacy text format: "mime:base64data"
+  // raw is stored as "mime:base64data"
   const sepIdx = raw.indexOf(':');
   if (sepIdx === -1) {
     return c.json({ errno: 1, errmsg: 'Invalid image data' }, 500);
@@ -125,6 +93,8 @@ imageRoutes.get('/:key', async (c) => {
   if (!ALLOWED_TYPES.includes(mime)) {
     return c.json({ errno: 1, errmsg: 'Unsupported image type' }, 415);
   }
+
+  // Convert base64 to binary
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
@@ -142,19 +112,26 @@ imageRoutes.get('/:key', async (c) => {
 
 // ---- Storage backends ----
 
-async function uploadToBlob(file: File, requestUrl: string): Promise<string> {
+async function uploadToKV(file: File, requestUrl: string): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+
+  // Convert to base64
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  const b64 = btoa(binary);
 
   // Key: timestamp + random 6 chars
   const ts = Date.now();
   const rand = Math.random().toString(36).slice(2, 8);
-  const ext = EXT_BY_TYPE[file.type] || 'bin';
-  const key = `${ts}-${rand}.${ext}`;
+  const key = `${ts}-${rand}`;
 
-  await Promise.all([
-    blobStorage.put(`img:${key}`, arrayBuffer),
-    blobStorage.put(`img-meta:${key}`, JSON.stringify({ mime: file.type })),
-  ]);
+  // Store as "mime:base64"
+  await WALINE_KV.put(`img:${key}`, `${file.type}:${b64}`);
 
   const origin = new URL(requestUrl).origin;
   return `${origin}/api/image/${key}`;

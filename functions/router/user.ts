@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
-import { blobStorage } from '../db/blob-storage.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 import { getAvatar } from '../utils/avatar.js';
 import { signJwt } from '../middleware/auth.js';
@@ -100,11 +99,11 @@ userRoutes.post('/', async (c) => {
   // Rate limit registration: 1 attempt per IP per 60 seconds
   const regIp = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || `noip:${email}`;
   const regKey = `reg_limit:${regIp}`;
-  const recent = await blobStorage.get(regKey);
+  const recent = await WALINE_KV.get(regKey);
   if (recent) {
     return c.json({ errno: 1, errmsg: '注册太频繁，请稍后再试' }, 429);
   }
-  await blobStorage.put(regKey, '1', { expirationTtl: 60 });
+  await WALINE_KV.put(regKey, '1', { expirationTtl: 60 });
 
   // Check if email exists (allow re-registration of unverified users)
   const existing = await getUserByEmail(email);
@@ -224,13 +223,13 @@ userRoutes.put('/password', async (c) => {
     return c.json({ errno: 1, errmsg: 'JWT secret not configured' }, 500);
   }
 
-  // Generate a one-time reset code stored in Blob storage (not exposed in URL)
+  // Generate a one-time reset code stored in KV (not exposed in URL)
   const resetCode = Array.from(
     crypto.getRandomValues(new Uint8Array(24)),
     (b) => b.toString(16).padStart(2, '0')
   ).join('');
   const jwtToken = await signJwt({ id: user.id as number }, jwtSecret, 3600);
-  await blobStorage.put(`reset:${resetCode}`, jwtToken, { expirationTtl: 3600 });
+  await WALINE_KV.put(`reset:${resetCode}`, jwtToken, { expirationTtl: 3600 });
 
   const siteUrl = cfg('site_url').replace(/^["']|["']$/g, '') || '';
   const siteName = cfg('site_name') || 'Waline';

@@ -7,7 +7,6 @@
  */
 import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
-import { migrateLegacyKvToBlobBatch } from '../db/kv-to-blob.js';
 import {
   getAllComments,
   getAllCounters,
@@ -31,7 +30,7 @@ const VALID_COUNTER_FIELDS = new Set([
   'reaction4', 'reaction5', 'reaction6', 'reaction7', 'reaction8',
 ]);
 
-// Table name mapping: Waline logical name -> internal storage table name
+// Table name mapping: Waline logical name -> KV table name
 const TABLE_MAP: Record<string, string> = {
   Comment: 'wl_Comment',
   Counter: 'wl_Counter',
@@ -60,39 +59,6 @@ dbRoutes.use('*', async (c, next) => {
   if (!userInfo) return c.json({ errno: 401, errmsg: 'Unauthorized' }, 401);
   if (userInfo.type !== 'administrator') return c.json({ errno: 403, errmsg: 'Forbidden' }, 403);
   await next();
-});
-
-/**
- * POST /api/db/migrate-kv-to-blob - Copy legacy WALINE_KV data into Pages Blob
- */
-dbRoutes.post('/migrate-kv-to-blob', async (c) => {
-  const overwrite = c.req.query('overwrite') === '1';
-  const cursor = c.req.query('cursor') || '';
-  const result = await migrateLegacyKvToBlobBatch(c.env, { overwrite, cursor });
-
-  if (!result.available) {
-    return c.json({
-      errno: 1,
-      errmsg: '未检测到旧 WALINE_KV 绑定，无法自动迁移。请先保留旧 KV 绑定再部署迁移版本。',
-      data: result,
-    }, 400);
-  }
-
-  if (result.failed > 0) {
-    return c.json({
-      errno: 1,
-      errmsg: `KV 转 Blob 未完全成功，失败 ${result.failed} 个 key，请查看 data.errors。`,
-      data: result,
-    }, 500);
-  }
-
-  return c.json({
-    errno: 0,
-    errmsg: result.complete
-      ? `KV 转 Blob 完成：本批复制 ${result.copied} 个，跳过已存在 ${result.skippedExisting} 个。`
-      : `KV 转 Blob 进行中：本批扫描 ${result.scanned} 个，复制 ${result.copied} 个。`,
-    data: result,
-  });
 });
 
 /**

@@ -305,7 +305,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     </div>
     <div style="background:var(--pe-accent-bg);border-radius:var(--pe-radius-sm);padding:16px;font-size:13px;color:var(--pe-text-secondary);line-height:1.7;">
       如果你是 <strong>管理员</strong>：登录后前往 <strong>用户管理</strong>，点击对应用户的「重置密码」按钮。<br><br>
-      如果你忘记了管理员密码：请联系服务器管理员在 Pages Blob 存储中直接修改，或重新注册（首个注册用户自动成为管理员）。
+      如果你忘记了管理员密码：请联系服务器管理员在 KV 存储中直接修改，或重新注册（首个注册用户自动成为管理员）。
     </div>
     <div style="margin-top:20px;">
       <button class="auth-btn" id="forgotBackBtn">返回登录</button>
@@ -409,13 +409,7 @@ const STATIC_TAIL = `;
       .then(function(r) {
         return r.text().then(function(txt) {
           try { return JSON.parse(txt); }
-          catch(e) {
-            var sample = (txt || '').replace(/\\s+/g, ' ').slice(0, 180);
-            return {
-              errno: 1,
-              errmsg: '服务器返回非 JSON 响应（HTTP ' + r.status + '）' + (sample ? '：' + sample : '')
-            };
-          }
+          catch(e) { return { errno: 1, errmsg: '服务器返回非 JSON 响应' }; }
         });
       });
   }
@@ -1089,18 +1083,6 @@ const STATIC_TAIL = `;
     c.innerHTML =
       '<div class="content-header"><h2>数据管理</h2><p>导出或导入 Waline 标准格式的数据（Comment / Counter / Users 三张表）</p></div>' +
       '<div class="pe-card">' +
-        '<div class="pe-card-title">KV 转 Blob</div>' +
-        '<p style="font-size:13px;color:var(--pe-text-secondary);margin:0 0 8px;">用于从旧版 EdgeOne KV 升级到 Pages Blob。请先在 EdgeOne Pages 项目中保留旧的 <code>WALINE_KV</code> 绑定，再点击下方按钮把旧 KV 数据复制到 Blob。</p>' +
-        '<p style="font-size:12px;color:var(--pe-text-muted);margin:0 0 14px;">默认不会覆盖 Blob 中已存在的 key。确认迁移和导出数据正常后，再到 EdgeOne 控制台移除旧 KV 绑定。</p>' +
-        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">' +
-          '<button class="pe-btn pe-btn-warning" id="migrateKvBtn"><i class="layui-icon layui-icon-transfer"></i> 从旧 KV 导入 Blob</button>' +
-          '<label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--pe-text-secondary);cursor:pointer;">' +
-            '<input type="checkbox" id="migrateOverwrite" style="width:auto;"> 覆盖 Blob 已存在数据' +
-          '</label>' +
-          '<span id="migrateKvStatus" style="font-size:13px;color:var(--pe-text-muted);"></span>' +
-        '</div>' +
-      '</div>' +
-      '<div class="pe-card">' +
         '<div class="pe-card-title">导出数据</div>' +
         '<p style="font-size:13px;color:var(--pe-text-secondary);margin:0 0 14px;">将当前全部数据打包为 Waline 通用 JSON 格式，可用于备份或迁移到其他 Waline 实例。</p>' +
         '<button class="pe-btn pe-btn-primary" id="exportBtn"><i class="layui-icon layui-icon-download-circle"></i> 导出所有数据</button>' +
@@ -1119,60 +1101,6 @@ const STATIC_TAIL = `;
         '</div>' +
         '<div id="importLog" class="import-log" style="display:none;"></div>' +
       '</div>';
-
-    /* ---- KV 转 Blob ---- */
-    c.querySelector('#migrateKvBtn').addEventListener('click', function() {
-      var btn = this;
-      var status = c.querySelector('#migrateKvStatus');
-      var overwrite = c.querySelector('#migrateOverwrite').checked;
-      var confirmText = overwrite
-        ? '确认覆盖 Blob 中已存在的同名数据？建议仅在重新迁移或确认 Blob 数据可覆盖时使用。'
-        : '确认开始从旧 WALINE_KV 复制数据到 Pages Blob？默认会跳过 Blob 已存在的数据。';
-      if (!confirm(confirmText)) return;
-
-      btn.disabled = true;
-      status.textContent = '正在迁移，请不要关闭页面...';
-      status.style.color = 'var(--pe-text-muted)';
-
-      var totals = { scanned: 0, copied: 0, skippedExisting: 0, skippedInvalid: 0, failed: 0 };
-      function addTotals(data) {
-        totals.scanned += data.scanned || 0;
-        totals.copied += data.copied || 0;
-        totals.skippedExisting += data.skippedExisting || 0;
-        totals.skippedInvalid += data.skippedInvalid || 0;
-        totals.failed += data.failed || 0;
-      }
-      function runBatch(cursor) {
-        var qs = [];
-        if (overwrite) qs.push('overwrite=1');
-        if (cursor) qs.push('cursor=' + encodeURIComponent(cursor));
-        api('/db/migrate-kv-to-blob' + (qs.length ? '?' + qs.join('&') : ''), { method: 'POST' }).then(function(d) {
-        var data = d.data || {};
-        addTotals(data);
-        if (d.errno !== 0) {
-          var firstError = data.errors && data.errors[0] ? '；' + data.errors[0].key + '：' + data.errors[0].message : '';
-          status.textContent = (d.errmsg || '迁移失败') + firstError;
-          status.style.color = 'var(--pe-danger)';
-          btn.disabled = false;
-          return;
-        }
-        if (data.complete) {
-          status.textContent = '迁移完成：扫描 ' + totals.scanned + '，复制 ' + totals.copied + '，跳过已存在 ' + totals.skippedExisting + '，无效 ' + totals.skippedInvalid + '，失败 ' + totals.failed;
-          status.style.color = 'var(--pe-success)';
-          btn.disabled = false;
-          return;
-        }
-        status.textContent = '正在迁移：' + (data.prefix || '') + '，累计扫描 ' + totals.scanned + '，复制 ' + totals.copied + '，跳过 ' + totals.skippedExisting;
-        status.style.color = 'var(--pe-text-muted)';
-        setTimeout(function() { runBatch(data.cursor || ''); }, 120);
-      }).catch(function(e) {
-        status.textContent = '请求失败：' + (e.message || '');
-        status.style.color = 'var(--pe-danger)';
-        btn.disabled = false;
-      });
-      }
-      runBatch('');
-    });
 
     /* ---- 导出 ---- */
     c.querySelector('#exportBtn').addEventListener('click', function() {

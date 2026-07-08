@@ -1,6 +1,5 @@
 import { createMiddleware } from 'hono/factory';
 import type { Env, Variables } from '../env.js';
-import { blobStorage } from '../db/blob-storage.js';
 import { getUserById } from '../db/kv-store.js';
 import { bufferSource, textBufferSource } from '../utils/crypto-source.js';
 
@@ -43,15 +42,15 @@ export const auth = createMiddleware<{
 
     // 检查 token 是否在黑名单中
     try {
-      const blacklisted = await blobStorage.get(`token:blacklist:${token}`);
+      const blacklisted = await WALINE_KV.get(`token:blacklist:${token}`);
       if (blacklisted) {
         return next(); // token 已失效，当作未认证处理
       }
     } catch (e) {
-      // Blob storage lookup failures should not block the request.
+      // KV 查询失败时不阻断请求
     }
 
-    // Fetch user from Blob-backed storage.
+    // Fetch user from KV
     const user = await getUserById(payload.id);
 
     if (user && user.type !== 'banned') {

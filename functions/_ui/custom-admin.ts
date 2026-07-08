@@ -376,11 +376,11 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
           <div class="pe-form-item">
             <label>存储类型</label>
             <select id="set-image-upload-type" onchange="toggleImageConfig(this.value)">
-              <option value="blob">Pages Blob（默认，无需额外配置）</option>
+              <option value="kv">数据库 KV（默认，无需额外配置）</option>
               <option value="qiniu">七牛云</option>
               <option value="upyun">又拍云</option>
             </select>
-            <p class="pe-desc">选择上传图片的存储后端。Pages Blob 存储在当前 EdgeOne Pages 项目的 Blob Store 中；七牛/又拍云需填写以下对应配置。仅登录用户可上传图片。</p>
+            <p class="pe-desc">选择上传图片的存储后端。KV 存储在评论数据库中；七牛/又拍云需填写以下对应配置。仅登录用户可上传图片。</p>
           </div>
         </div>
         <div class="setting-card" id="img-qiniu-config" style="display:none;">
@@ -485,10 +485,6 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     else { el.value = val || ''; }
   }
 
-  function normalizeImageUploadType(value) {
-    return (value === 'qiniu' || value === 'upyun') ? value : 'blob';
-  }
-
   // Fetch npm versions
   function fetchVersions() {
     var btn = document.getElementById('refresh-versions');
@@ -550,9 +546,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     setVal('set-push-plus-webhook', s.push_plus_webhook);
     setVal('set-push-plus-callbackurl', s.push_plus_callbackurl);
     // Image upload
-    var imageUploadType = normalizeImageUploadType(s.image_upload_type);
-    setVal('set-image-upload-type', imageUploadType);
-    toggleImageConfig(imageUploadType);
+    setVal('set-image-upload-type', s.image_upload_type);
+    toggleImageConfig(s.image_upload_type || 'kv');
     setVal('set-qiniu-access-key', s.qiniu_access_key);
     setVal('set-qiniu-secret-key', s.qiniu_secret_key);
     setVal('set-qiniu-bucket', s.qiniu_bucket);
@@ -603,7 +598,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       push_plus_webhook: document.getElementById('set-push-plus-webhook').value.trim(),
       push_plus_callbackurl: document.getElementById('set-push-plus-callbackurl').value.trim(),
       // Image upload
-      image_upload_type: normalizeImageUploadType(document.getElementById('set-image-upload-type').value),
+      image_upload_type: document.getElementById('set-image-upload-type').value,
       qiniu_access_key: document.getElementById('set-qiniu-access-key').value.trim(),
       qiniu_secret_key: document.getElementById('set-qiniu-secret-key').value.trim(),
       qiniu_bucket: document.getElementById('set-qiniu-bucket').value.trim(),
