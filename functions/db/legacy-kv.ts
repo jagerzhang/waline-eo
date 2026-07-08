@@ -17,8 +17,18 @@ export interface LegacyKVNamespace {
   list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<LegacyKVListResult>;
 }
 
+export const LEGACY_KV_LIST_LIMIT_MAX = 256;
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function normalizeListLimit(limit: number | undefined): number | undefined {
+  if (limit === undefined || !Number.isFinite(limit)) return undefined;
+
+  const normalized = Math.floor(limit);
+  if (normalized <= 0) return undefined;
+  return Math.min(normalized, LEGACY_KV_LIST_LIMIT_MAX);
 }
 
 function isUndefinedCursorError(error: unknown): boolean {
@@ -54,7 +64,8 @@ export async function legacyListPage(
 ): Promise<LegacyKVListResult> {
   const cleanOptions: { prefix?: string; limit?: number; cursor?: string } = {};
   if (options?.prefix !== undefined) cleanOptions.prefix = options.prefix;
-  if (options?.limit !== undefined) cleanOptions.limit = options.limit;
+  const limit = normalizeListLimit(options?.limit);
+  if (limit !== undefined) cleanOptions.limit = limit;
   if (typeof options?.cursor === 'string' && options.cursor !== '') cleanOptions.cursor = options.cursor;
 
   try {

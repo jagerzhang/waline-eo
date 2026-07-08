@@ -1,5 +1,6 @@
 import { blobStorage } from './blob-storage.js';
 import {
+  LEGACY_KV_LIST_LIMIT_MAX,
   getLegacyKV,
   legacyListKeyName,
   legacyListPage,
@@ -100,7 +101,10 @@ async function runLegacyKvToBlobMigration(
   for (const prefix of MIGRATION_PREFIXES) {
     let cursor: string | undefined;
     do {
-      const listOptions: { prefix: string; limit: number; cursor?: string } = { prefix, limit: 1000 };
+      const listOptions: { prefix: string; limit: number; cursor?: string } = {
+        prefix,
+        limit: LEGACY_KV_LIST_LIMIT_MAX,
+      };
       if (cursor) listOptions.cursor = cursor;
 
       const list = await legacyListPage(kv, listOptions);
