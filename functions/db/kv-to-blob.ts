@@ -39,8 +39,10 @@ const MIGRATION_PREFIXES = [
 ];
 
 const SKIP_KEYS = new Set([MIGRATION_MARKER_KEY]);
-const COPY_CONCURRENCY = 8;
-const BATCH_LIST_LIMIT = 32;
+const COPY_CONCURRENCY = 1;
+const BATCH_LIST_LIMIT = 8;
+const STORAGE_RETRY_ATTEMPTS = 6;
+const STORAGE_RETRY_BASE_DELAY_MS = 250;
 
 function emptyResult(available: boolean): KvToBlobMigrationResult {
   return {
@@ -56,7 +58,47 @@ function emptyResult(available: boolean): KvToBlobMigrationResult {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  const compact = message.replace(/\s+/g, ' ').trim();
+  if (compact.includes('CLOUD_FUNCTION_INVOCATION_FAILED')) {
+    return 'PagesBlob 写入失败：EdgeOne/COS 返回 502 CLOUD_FUNCTION_INVOCATION_FAILED，已自动重试多次仍失败，可稍后重新点击迁移继续。';
+  }
+  if (compact.includes('COS returned 502')) {
+    return 'PagesBlob 写入失败：COS returned 502，已自动重试多次仍失败，可稍后重新点击迁移继续。';
+  }
+  return compact.length > 360 ? `${compact.slice(0, 360)}...` : compact;
+}
+
+function isRetryableStorageError(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase();
+  return message.includes('502')
+    || message.includes('503')
+    || message.includes('504')
+    || message.includes('cloud_function_invocation_failed')
+    || message.includes('cos returned')
+    || message.includes('timeout')
+    || message.includes('timed out')
+    || message.includes('network');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withStorageRetry<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= STORAGE_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableStorageError(error) || attempt === STORAGE_RETRY_ATTEMPTS) break;
+      await sleep(STORAGE_RETRY_BASE_DELAY_MS * attempt * attempt);
+    }
+  }
+
+  throw lastError;
 }
 
 function parseBatchCursor(cursor?: string): { prefixIndex: number; kvCursor?: string } {
@@ -107,14 +149,14 @@ async function runInChunks<T>(items: T[], size: number, worker: (item: T) => Pro
 }
 
 async function writeMigrationMarker(result: KvToBlobMigrationResult): Promise<void> {
-  await blobStorage.put(MIGRATION_MARKER_KEY, JSON.stringify({
+  await withStorageRetry(() => blobStorage.put(MIGRATION_MARKER_KEY, JSON.stringify({
     migratedAt: new Date().toISOString(),
     mode: 'batch',
     scanned: result.scanned,
     copied: result.copied,
     skippedExisting: result.skippedExisting,
     skippedInvalid: result.skippedInvalid,
-  }));
+  })));
   result.markerWritten = true;
 }
 
@@ -168,15 +210,15 @@ export async function migrateLegacyKvToBlobBatch(
 
       try {
         if (!options?.overwrite) {
-          const existing = await blobStorage.get(key, { type: 'arrayBuffer' });
+          const existing = await withStorageRetry(() => blobStorage.get(key, { type: 'arrayBuffer' }));
           if (existing !== null) {
             result.skippedExisting++;
             return;
           }
         }
 
-        const value = await readLegacyValue(kv, key);
-        await blobStorage.put(key, value);
+        const value = await withStorageRetry(() => readLegacyValue(kv, key));
+        await withStorageRetry(() => blobStorage.put(key, value));
         result.copied++;
       } catch (error) {
         result.failed++;
