@@ -7,7 +7,7 @@
  */
 import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
-import { hasKvToBlobMigrationMarker, migrateLegacyKvToBlob } from '../db/kv-to-blob.js';
+import { migrateLegacyKvToBlobBatch } from '../db/kv-to-blob.js';
 import {
   getAllComments,
   getAllCounters,
@@ -62,25 +62,13 @@ dbRoutes.use('*', async (c, next) => {
   await next();
 });
 
-async function autoMigrateLegacyKv(env: Env): Promise<void> {
-  if (await hasKvToBlobMigrationMarker()) return;
-
-  const result = await migrateLegacyKvToBlob(env, { overwrite: false });
-  if (!result.available || result.scanned === 0) return;
-
-  if (result.failed > 0) {
-    const firstError = result.errors[0];
-    const detail = firstError ? ` First failed key: ${firstError.key}: ${firstError.message}` : '';
-    throw new Error(`KV to Blob migration failed for ${result.failed} key(s).${detail}`);
-  }
-}
-
 /**
  * POST /api/db/migrate-kv-to-blob - Copy legacy WALINE_KV data into Pages Blob
  */
 dbRoutes.post('/migrate-kv-to-blob', async (c) => {
   const overwrite = c.req.query('overwrite') === '1';
-  const result = await migrateLegacyKvToBlob(c.env, { overwrite });
+  const cursor = c.req.query('cursor') || '';
+  const result = await migrateLegacyKvToBlobBatch(c.env, { overwrite, cursor });
 
   if (!result.available) {
     return c.json({
@@ -100,7 +88,9 @@ dbRoutes.post('/migrate-kv-to-blob', async (c) => {
 
   return c.json({
     errno: 0,
-    errmsg: `KV 转 Blob 完成：复制 ${result.copied} 个，跳过已存在 ${result.skippedExisting} 个。`,
+    errmsg: result.complete
+      ? `KV 转 Blob 完成：本批复制 ${result.copied} 个，跳过已存在 ${result.skippedExisting} 个。`
+      : `KV 转 Blob 进行中：本批扫描 ${result.scanned} 个，复制 ${result.copied} 个。`,
     data: result,
   });
 });
@@ -110,8 +100,6 @@ dbRoutes.post('/migrate-kv-to-blob', async (c) => {
  * Admin panel's request() unwraps: { __version, ...result.data }
  */
 dbRoutes.get('/', async (c) => {
-  await autoMigrateLegacyKv(c.env);
-
   const exportData: any = {
     __version: '1.31.13',
     type: 'waline',

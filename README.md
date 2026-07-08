@@ -91,7 +91,7 @@
 |---|---|---|
 | `JWT_SECRET` | JWT 签名密钥，请设置足够复杂的随机字符串 | 是 |
 
-> 从旧版 EdgeOne KV 升级到 Pages Blob 时，请暂时保留旧的 `WALINE_KV` 绑定。管理员导出数据或调用 `/api/db/migrate-kv-to-blob` 时会自动把旧 KV 数据复制到 Blob；确认迁移成功后再删除旧 KV 绑定。
+> 从旧版 EdgeOne KV 升级到 Pages Blob 时，请暂时保留旧的 `WALINE_KV` 绑定。部署后进入后台“数据管理”，点击“从旧 KV 导入 Blob”执行分页迁移；确认迁移成功并能正常导出数据后，再删除旧 KV 绑定。
 
 > 旧版中需要配置的 `SITE_NAME`、`SITE_URL`、`AUTHOR_EMAIL`、`IPQPS`、`COMMENT_AUDIT`、`AKISMET_KEY`、`DISABLE_REGION`、`DISABLE_USERAGENT` 等变量，现已全部迁移至后台 `/ui/worker-setting` 页面，部署后登录管理员账号即可可视化配置。
 

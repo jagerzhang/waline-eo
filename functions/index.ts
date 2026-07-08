@@ -2,7 +2,6 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env, Variables } from './env.js';
 import { blobStorage } from './db/blob-storage.js';
-import { scheduleLegacyKvToBlobMigration } from './db/kv-to-blob.js';
 import { auth } from './middleware/auth.js';
 import { commentRoutes } from './router/comment.js';
 import { articleRoutes } from './router/article.js';
@@ -106,17 +105,6 @@ app.use('*', async (c, next) => {
 
 // Auth middleware - parse JWT on all routes (non-blocking, skips if no token)
 app.use('*', auth);
-
-// When an administrator uses the new Blob version while the legacy KV binding
-// is still present, start a one-time KV -> Blob migration in the background.
-app.use('*', async (c, next) => {
-  const userInfo = c.get('userInfo');
-  if (userInfo?.type === 'administrator') {
-    const waitUntil = (c.executionCtx as { waitUntil?: (promise: Promise<unknown>) => void } | undefined)?.waitUntil;
-    await scheduleLegacyKvToBlobMigration(c.env, waitUntil?.bind(c.executionCtx));
-  }
-  await next();
-});
 
 // Global error handler (catches malformed JSON bodies, etc.)
 app.onError((err, c) => {

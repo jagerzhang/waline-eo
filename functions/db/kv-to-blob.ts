@@ -1,6 +1,5 @@
 import { blobStorage } from './blob-storage.js';
 import {
-  LEGACY_KV_LIST_LIMIT_MAX,
   getLegacyKV,
   legacyListKeyName,
   legacyListPage,
@@ -18,6 +17,13 @@ export interface KvToBlobMigrationResult {
   markerWritten: boolean;
 }
 
+export interface KvToBlobMigrationBatchResult extends KvToBlobMigrationResult {
+  complete: boolean;
+  cursor: string;
+  prefix: string;
+  prefixIndex: number;
+}
+
 const MIGRATION_MARKER_KEY = 'meta:migration:kv_to_blob';
 const MIGRATION_PREFIXES = [
   'comment:',
@@ -33,15 +39,43 @@ const MIGRATION_PREFIXES = [
 ];
 
 const SKIP_KEYS = new Set([MIGRATION_MARKER_KEY]);
-const COPY_CONCURRENCY = 16;
-const SCHEDULE_CHECK_TTL_MS = 60_000;
+const COPY_CONCURRENCY = 8;
+const BATCH_LIST_LIMIT = 32;
 
-let activeMigration: Promise<KvToBlobMigrationResult> | null = null;
-let migrationMarkerCached = false;
-let lastScheduleCheckAt = 0;
+function emptyResult(available: boolean): KvToBlobMigrationResult {
+  return {
+    available,
+    scanned: 0,
+    copied: 0,
+    skippedExisting: 0,
+    skippedInvalid: 0,
+    failed: 0,
+    errors: [],
+    markerWritten: false,
+  };
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parseBatchCursor(cursor?: string): { prefixIndex: number; kvCursor?: string } {
+  if (!cursor) return { prefixIndex: 0 };
+
+  try {
+    const state = JSON.parse(cursor) as { prefixIndex?: unknown; cursor?: unknown };
+    const prefixIndex = typeof state.prefixIndex === 'number' && Number.isFinite(state.prefixIndex)
+      ? Math.max(0, Math.floor(state.prefixIndex))
+      : 0;
+    const kvCursor = typeof state.cursor === 'string' && state.cursor !== '' ? state.cursor : undefined;
+    return { prefixIndex, kvCursor };
+  } catch {
+    return { prefixIndex: 0 };
+  }
+}
+
+function encodeBatchCursor(prefixIndex: number, cursor?: string): string {
+  return JSON.stringify(cursor ? { prefixIndex, cursor } : { prefixIndex });
 }
 
 function isMigratableKey(key: string): boolean {
@@ -72,133 +106,109 @@ async function runInChunks<T>(items: T[], size: number, worker: (item: T) => Pro
   }
 }
 
-export async function hasKvToBlobMigrationMarker(): Promise<boolean> {
-  if (migrationMarkerCached) return true;
-  const exists = (await blobStorage.get(MIGRATION_MARKER_KEY).catch(() => null)) !== null;
-  if (exists) migrationMarkerCached = true;
-  return exists;
+async function writeMigrationMarker(result: KvToBlobMigrationResult): Promise<void> {
+  await blobStorage.put(MIGRATION_MARKER_KEY, JSON.stringify({
+    migratedAt: new Date().toISOString(),
+    mode: 'batch',
+    scanned: result.scanned,
+    copied: result.copied,
+    skippedExisting: result.skippedExisting,
+    skippedInvalid: result.skippedInvalid,
+  }));
+  result.markerWritten = true;
 }
 
-async function runLegacyKvToBlobMigration(
+export async function migrateLegacyKvToBlobBatch(
   env?: unknown,
-  options?: { overwrite?: boolean },
-): Promise<KvToBlobMigrationResult> {
+  options?: { overwrite?: boolean; cursor?: string },
+): Promise<KvToBlobMigrationBatchResult> {
   const kv = getLegacyKV(env);
-  const result: KvToBlobMigrationResult = {
-    available: !!kv,
-    scanned: 0,
-    copied: 0,
-    skippedExisting: 0,
-    skippedInvalid: 0,
-    failed: 0,
-    errors: [],
-    markerWritten: false,
+  const result: KvToBlobMigrationBatchResult = {
+    ...emptyResult(!!kv),
+    complete: false,
+    cursor: '',
+    prefix: '',
+    prefixIndex: 0,
   };
-  if (!kv) return result;
-
-  const seen = new Set<string>();
-
-  for (const prefix of MIGRATION_PREFIXES) {
-    let cursor: string | undefined;
-    do {
-      const listOptions: { prefix: string; limit: number; cursor?: string } = {
-        prefix,
-        limit: LEGACY_KV_LIST_LIMIT_MAX,
-      };
-      if (cursor) listOptions.cursor = cursor;
-
-      const list = await legacyListPage(kv, listOptions);
-      const keys = list.keys || [];
-
-      await runInChunks(keys, COPY_CONCURRENCY, async (item) => {
-        const key = legacyListKeyName(item);
-        if (!key || seen.has(key)) return;
-        seen.add(key);
-        result.scanned++;
-
-        if (!isMigratableKey(key)) {
-          result.skippedInvalid++;
-          return;
-        }
-
-        try {
-          if (!options?.overwrite) {
-            const existing = await blobStorage.get(key, { type: 'arrayBuffer' });
-            if (existing !== null) {
-              result.skippedExisting++;
-              return;
-            }
-          }
-
-          const value = await readLegacyValue(kv, key);
-          await blobStorage.put(key, value);
-          result.copied++;
-        } catch (error) {
-          result.failed++;
-          if (result.errors.length < 20) {
-            result.errors.push({ key, message: errorMessage(error) });
-          }
-        }
-      });
-
-      cursor = list.complete === false && list.cursor ? list.cursor : undefined;
-    } while (cursor);
+  if (!kv) {
+    result.complete = true;
+    return result;
   }
 
-  if (result.failed === 0) {
-    await blobStorage.put(MIGRATION_MARKER_KEY, JSON.stringify({
-      migratedAt: new Date().toISOString(),
-      scanned: result.scanned,
-      copied: result.copied,
-      skippedExisting: result.skippedExisting,
-      skippedInvalid: result.skippedInvalid,
-    }));
-    result.markerWritten = true;
-    migrationMarkerCached = true;
+  let { prefixIndex, kvCursor } = parseBatchCursor(options?.cursor);
+  if (prefixIndex >= MIGRATION_PREFIXES.length) {
+    result.complete = true;
+    return result;
   }
 
-  return result;
-}
+  while (prefixIndex < MIGRATION_PREFIXES.length) {
+    const prefix = MIGRATION_PREFIXES[prefixIndex];
+    const currentCursor = kvCursor;
+    result.prefix = prefix;
+    result.prefixIndex = prefixIndex;
 
-export async function migrateLegacyKvToBlob(
-  env?: unknown,
-  options?: { overwrite?: boolean },
-): Promise<KvToBlobMigrationResult> {
-  if (!options?.overwrite && activeMigration) return activeMigration;
+    const listOptions: { prefix: string; limit: number; cursor?: string } = {
+      prefix,
+      limit: BATCH_LIST_LIMIT,
+    };
+    if (currentCursor) listOptions.cursor = currentCursor;
 
-  const migration = runLegacyKvToBlobMigration(env, options);
-  if (!options?.overwrite) {
-    activeMigration = migration.finally(() => {
-      activeMigration = null;
+    const list = await legacyListPage(kv, listOptions);
+    const keys = list.keys || [];
+
+    await runInChunks(keys, COPY_CONCURRENCY, async (item) => {
+      const key = legacyListKeyName(item);
+      if (!key) return;
+      result.scanned++;
+
+      if (!isMigratableKey(key)) {
+        result.skippedInvalid++;
+        return;
+      }
+
+      try {
+        if (!options?.overwrite) {
+          const existing = await blobStorage.get(key, { type: 'arrayBuffer' });
+          if (existing !== null) {
+            result.skippedExisting++;
+            return;
+          }
+        }
+
+        const value = await readLegacyValue(kv, key);
+        await blobStorage.put(key, value);
+        result.copied++;
+      } catch (error) {
+        result.failed++;
+        if (result.errors.length < 20) {
+          result.errors.push({ key, message: errorMessage(error) });
+        }
+      }
     });
-    return activeMigration;
+
+    if (result.failed > 0) {
+      result.cursor = encodeBatchCursor(prefixIndex, currentCursor);
+      return result;
+    }
+
+    if (list.complete === false && list.cursor) {
+      result.cursor = encodeBatchCursor(prefixIndex, list.cursor);
+      return result;
+    }
+
+    prefixIndex++;
+    kvCursor = undefined;
+
+    if (keys.length > 0) {
+      result.complete = prefixIndex >= MIGRATION_PREFIXES.length;
+      result.cursor = result.complete ? '' : encodeBatchCursor(prefixIndex);
+      if (result.complete) await writeMigrationMarker(result);
+      return result;
+    }
   }
 
-  return migration;
-}
-
-export async function scheduleLegacyKvToBlobMigration(
-  env?: unknown,
-  waitUntil?: (promise: Promise<unknown>) => void,
-): Promise<boolean> {
-  if (migrationMarkerCached || !getLegacyKV(env)) return false;
-  if (activeMigration) {
-    waitUntil?.(activeMigration.then(() => undefined).catch((error) => {
-      console.error(`[Waline Blob] background KV migration failed: ${errorMessage(error)}`);
-    }));
-    return true;
-  }
-
-  const now = Date.now();
-  if (now - lastScheduleCheckAt < SCHEDULE_CHECK_TTL_MS) return false;
-  lastScheduleCheckAt = now;
-
-  if (await hasKvToBlobMigrationMarker()) return false;
-
-  const migration = migrateLegacyKvToBlob(env, { overwrite: false });
-  const background = migration.then(() => undefined).catch((error) => {
-    console.error(`[Waline Blob] background KV migration failed: ${errorMessage(error)}`);
-  });
-  waitUntil?.(background);
-  return true;
+  result.complete = true;
+  result.cursor = '';
+  await writeMigrationMarker(result);
+  return result;
 }

@@ -409,7 +409,13 @@ const STATIC_TAIL = `;
       .then(function(r) {
         return r.text().then(function(txt) {
           try { return JSON.parse(txt); }
-          catch(e) { return { errno: 1, errmsg: '服务器返回非 JSON 响应' }; }
+          catch(e) {
+            var sample = (txt || '').replace(/\\s+/g, ' ').slice(0, 180);
+            return {
+              errno: 1,
+              errmsg: '服务器返回非 JSON 响应（HTTP ' + r.status + '）' + (sample ? '：' + sample : '')
+            };
+          }
         });
       });
   }
@@ -1128,22 +1134,44 @@ const STATIC_TAIL = `;
       status.textContent = '正在迁移，请不要关闭页面...';
       status.style.color = 'var(--pe-text-muted)';
 
-      api('/db/migrate-kv-to-blob' + (overwrite ? '?overwrite=1' : ''), { method: 'POST' }).then(function(d) {
+      var totals = { scanned: 0, copied: 0, skippedExisting: 0, skippedInvalid: 0, failed: 0 };
+      function addTotals(data) {
+        totals.scanned += data.scanned || 0;
+        totals.copied += data.copied || 0;
+        totals.skippedExisting += data.skippedExisting || 0;
+        totals.skippedInvalid += data.skippedInvalid || 0;
+        totals.failed += data.failed || 0;
+      }
+      function runBatch(cursor) {
+        var qs = [];
+        if (overwrite) qs.push('overwrite=1');
+        if (cursor) qs.push('cursor=' + encodeURIComponent(cursor));
+        api('/db/migrate-kv-to-blob' + (qs.length ? '?' + qs.join('&') : ''), { method: 'POST' }).then(function(d) {
         var data = d.data || {};
+        addTotals(data);
         if (d.errno !== 0) {
-          status.textContent = d.errmsg || '迁移失败';
+          var firstError = data.errors && data.errors[0] ? '；' + data.errors[0].key + '：' + data.errors[0].message : '';
+          status.textContent = (d.errmsg || '迁移失败') + firstError;
           status.style.color = 'var(--pe-danger)';
           btn.disabled = false;
           return;
         }
-        status.textContent = '迁移完成：扫描 ' + (data.scanned || 0) + '，复制 ' + (data.copied || 0) + '，跳过已存在 ' + (data.skippedExisting || 0) + '，失败 ' + (data.failed || 0);
-        status.style.color = 'var(--pe-success)';
-        btn.disabled = false;
+        if (data.complete) {
+          status.textContent = '迁移完成：扫描 ' + totals.scanned + '，复制 ' + totals.copied + '，跳过已存在 ' + totals.skippedExisting + '，无效 ' + totals.skippedInvalid + '，失败 ' + totals.failed;
+          status.style.color = 'var(--pe-success)';
+          btn.disabled = false;
+          return;
+        }
+        status.textContent = '正在迁移：' + (data.prefix || '') + '，累计扫描 ' + totals.scanned + '，复制 ' + totals.copied + '，跳过 ' + totals.skippedExisting;
+        status.style.color = 'var(--pe-text-muted)';
+        setTimeout(function() { runBatch(data.cursor || ''); }, 120);
       }).catch(function(e) {
         status.textContent = '请求失败：' + (e.message || '');
         status.style.color = 'var(--pe-danger)';
         btn.disabled = false;
       });
+      }
+      runBatch('');
     });
 
     /* ---- 导出 ---- */
