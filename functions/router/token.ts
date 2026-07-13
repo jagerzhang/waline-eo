@@ -61,9 +61,21 @@ tokenRoutes.post('/', async (c) => {
     return c.json({ errno: 1, errmsg: 'email and password are required' }, 400);
   }
 
+  const loginIp = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  const loginRateKey = `login_attempts:${loginIp}`;
+  let loginAttempts = 0;
+  try { loginAttempts = Number(await WALINE_KV.get(loginRateKey) || '0'); } catch {}
+  if (loginAttempts >= 5) {
+    return c.json({ errno: 1, errmsg: 'Too many login attempts, please try again later' }, 429);
+  }
+  const recordLoginFailure = async () => {
+    try { await WALINE_KV.put(loginRateKey, String(loginAttempts + 1), { expirationTtl: 900 }); } catch {}
+  };
+
   const user = await getUserByEmail(email);
 
   if (!user) {
+    await recordLoginFailure();
     return c.json({ errno: 1, errmsg: 'Invalid email or password' }, 401);
   }
 
@@ -73,6 +85,7 @@ tokenRoutes.post('/', async (c) => {
 
   const valid = await verifyPassword(password, user.password as string);
   if (!valid) {
+    await recordLoginFailure();
     return c.json({ errno: 1, errmsg: 'Invalid email or password' }, 401);
   }
 
@@ -83,6 +96,7 @@ tokenRoutes.post('/', async (c) => {
     }
     const verified2fa = await verifyTotp(user['2fa'] as string, body.code);
     if (!verified2fa) {
+      await recordLoginFailure();
       return c.json({ errno: 1, errmsg: 'Two factor auth verify failed, please try again' }, 401);
     }
   }
@@ -93,6 +107,7 @@ tokenRoutes.post('/', async (c) => {
   }
 
   const token = await signJwt({ id: user.id as number }, jwtSecret);
+  try { await WALINE_KV.delete(loginRateKey); } catch {}
 
   const userEmail = (user.email as string).toLowerCase();
   const [avatar, mailMd5] = await Promise.all([
@@ -127,8 +142,14 @@ tokenRoutes.post('/', async (c) => {
  */
 tokenRoutes.delete('/', async (c) => {
   const authHeader = c.req.header('Authorization') || '';
+  const rawCookieToken = c.req.header('cookie')?.match(/(?:^|;\s*)TOKEN=([^;]+)/)?.[1];
+  let cookieToken = '';
+  if (rawCookieToken) {
+    try { cookieToken = decodeURIComponent(rawCookieToken); } catch { cookieToken = rawCookieToken; }
+  }
   const token = authHeader.replace('Bearer ', '').trim()
     || c.req.query('token')
+    || cookieToken
     || '';
 
   if (token) {
@@ -140,7 +161,10 @@ tokenRoutes.delete('/', async (c) => {
     }
   }
 
-  return c.json({ errno: 0, errmsg: '' });
+  const isSecure = new URL(c.req.url).protocol === 'https:';
+  return c.json({ errno: 0, errmsg: '' }, 200, {
+    'Set-Cookie': `TOKEN=; HttpOnly; ${isSecure ? 'Secure; ' : ''}SameSite=Lax; Path=/; Max-Age=0`,
+  });
 });
 
 /**

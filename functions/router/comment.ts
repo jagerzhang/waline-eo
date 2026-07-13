@@ -104,6 +104,14 @@ commentRoutes.post('/', async (c) => {
   if (link && (typeof link !== 'string' || link.length > 255)) {
     return c.json({ errno: 1, errmsg: 'link is too long (max 255 chars)' }, 400);
   }
+  if (link) {
+    try {
+      const profileURL = new URL(link);
+      if (!['http:', 'https:'].includes(profileURL.protocol)) throw new Error();
+    } catch {
+      return c.json({ errno: 1, errmsg: 'link must be a valid HTTP(S) URL' }, 400);
+    }
+  }
   if (url && (typeof url !== 'string' || url.length > 1024)) {
     return c.json({ errno: 1, errmsg: 'url is too long (max 1024 chars)' }, 400);
   }
@@ -117,19 +125,38 @@ commentRoutes.post('/', async (c) => {
   const isAdmin = userInfo?.type === 'administrator';
 
   if (!isAdmin) {
-    const [gtCaptchaId, gtCaptchaKey] = await Promise.all([
+    const [kvCaptchaId, kvCaptchaKey] = await Promise.all([
       getSetting('geetest_captcha_id').catch(() => null),
       getSetting('geetest_captcha_key').catch(() => null),
     ]);
+    const gtCaptchaId = kvCaptchaId || c.env.GEETEST_CAPTCHA_ID || '';
+    const gtCaptchaKey = kvCaptchaKey || c.env.GEETEST_CAPTCHA_KEY || '';
+    if (!!gtCaptchaId !== !!gtCaptchaKey) {
+      return c.json({ errno: 1, errmsg: '评论验证配置不完整，请联系站点管理员' }, 503);
+    }
     if (gtCaptchaId && gtCaptchaKey) {
-      const { geetest_lot_number, geetest_pass_token, geetest_gen_time } = body;
-      if (!geetest_lot_number || !geetest_pass_token || !geetest_gen_time) {
+      const {
+        geetest_lot_number,
+        geetest_captcha_output,
+        geetest_pass_token,
+        geetest_gen_time,
+        geetest_captcha_id,
+      } = body;
+      if (!geetest_lot_number || !geetest_captcha_output || !geetest_pass_token || !geetest_gen_time) {
         return c.json({ errno: 1, errmsg: '请完成人机验证后再提交评论' }, 400);
+      }
+      if (geetest_captcha_id && geetest_captcha_id !== gtCaptchaId) {
+        return c.json({ errno: 1, errmsg: '人机验证配置不一致，请刷新页面后重试' }, 400);
+      }
+      const captchaFields = [geetest_lot_number, geetest_captcha_output, geetest_pass_token, geetest_gen_time];
+      if (captchaFields.some((value) => typeof value !== 'string' || value.length > 16384)) {
+        return c.json({ errno: 1, errmsg: '人机验证参数格式错误' }, 400);
       }
       const passed = await validateGeetest({
         captchaId: gtCaptchaId,
         captchaKey: gtCaptchaKey,
         lotNumber: geetest_lot_number,
+        captchaOutput: geetest_captcha_output,
         passToken: geetest_pass_token,
         genTime: geetest_gen_time,
       });
@@ -371,6 +398,7 @@ commentRoutes.post('/', async (c) => {
  */
 commentRoutes.put('/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
+  if (!Number.isInteger(id) || id <= 0) return c.json({ errno: 1, errmsg: 'Invalid comment id' }, 400);
   const userInfo = c.get('userInfo');
   const body = await c.req.json();
   const isAdmin = userInfo?.type === 'administrator';
@@ -390,7 +418,7 @@ commentRoutes.put('/:id', async (c) => {
     }
     await WALINE_KV.put(likeKey, '1', { expirationTtl: 60 });
     const updated = await updateComment(id, {
-      like: Math.max(0, (existing.like || 0) + 1),
+      like: Math.max(0, (existing.like || 0) + (body.like ? 1 : -1)),
     });
     if (!updated) {
       return c.json({ errno: 1, errmsg: 'Comment not found' }, 404);
@@ -406,9 +434,15 @@ commentRoutes.put('/:id', async (c) => {
   const updates: Partial<KVComment> = {};
 
   if (body.status !== undefined) {
+    if (!['approved', 'waiting', 'spam'].includes(body.status)) {
+      return c.json({ errno: 1, errmsg: 'Invalid comment status' }, 400);
+    }
     updates.status = body.status;
   }
   if (body.comment !== undefined) {
+    if (typeof body.comment !== 'string' || body.comment.length > 65536) {
+      return c.json({ errno: 1, errmsg: 'comment is too long (max 64KB)' }, 400);
+    }
     updates.comment = renderMarkdown(body.comment);
     updates.orig = body.comment;
   }
@@ -462,6 +496,7 @@ commentRoutes.put('/:id', async (c) => {
  */
 commentRoutes.delete('/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
+  if (!Number.isInteger(id) || id <= 0) return c.json({ errno: 1, errmsg: 'Invalid comment id' }, 400);
   const userInfo = c.get('userInfo');
 
   if (userInfo?.type !== 'administrator') {

@@ -1944,6 +1944,11 @@ export async function setSettings(settings: Record<string, string>): Promise<voi
   await Promise.all(Object.entries(settings).map(([key, value]) => setSetting(key, value)));
 }
 
+export async function deleteSetting(key: string): Promise<void> {
+  await deleteKvKey(`setting:${key}`);
+  settingsCache.delete(key);
+}
+
 export async function clearSettings(): Promise<void> {
   let cursor: string | undefined;
   do {

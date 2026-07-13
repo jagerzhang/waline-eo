@@ -9,6 +9,7 @@ export interface GeetestParams {
   captchaId: string;
   captchaKey: string;
   lotNumber: string;
+  captchaOutput: string;
   passToken: string;
   genTime: string;
 }
@@ -28,13 +29,16 @@ async function hmacSha256(key: string, message: string): Promise<string> {
     .join('');
 }
 
-export async function validateGeetest(params: GeetestParams): Promise<boolean> {
+export async function validateGeetest(params: GeetestParams, timeoutMs = 8000): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const signToken = await hmacSha256(params.captchaKey, params.lotNumber);
 
     const body = new URLSearchParams();
     body.append('lot_number', params.lotNumber);
     body.append('captcha_id', params.captchaId);
+    body.append('captcha_output', params.captchaOutput);
     body.append('pass_token', params.passToken);
     body.append('gen_time', params.genTime);
     body.append('sign_token', signToken);
@@ -43,12 +47,15 @@ export async function validateGeetest(params: GeetestParams): Promise<boolean> {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
+      signal: controller.signal,
     });
 
     if (!resp.ok) return false;
     const data = (await resp.json()) as any;
-    return data.status === 'success' && data.result === 'success';
+    return data.result === 'success' && (data.status === undefined || data.status === 'success');
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
   }
 }

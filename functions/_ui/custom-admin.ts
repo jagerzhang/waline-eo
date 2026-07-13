@@ -485,6 +485,28 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     else { el.value = val || ''; }
   }
 
+  function markSecret(id, configured) {
+    var el = document.getElementById(id);
+    if (!el || configured !== 'true') return;
+    el.value = '';
+    el.placeholder = '已配置，留空则保持不变';
+    el.dataset.secretConfigured = 'true';
+    if (el.parentElement.querySelector('[data-clear-secret="' + id + '"]')) return;
+    var clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'layui-btn layui-btn-primary layui-btn-xs';
+    clearBtn.setAttribute('data-clear-secret', id);
+    clearBtn.style.marginTop = '6px';
+    clearBtn.textContent = '清除已保存值';
+    clearBtn.onclick = function() {
+      el.value = '';
+      el.dataset.clearSecret = 'true';
+      el.placeholder = '保存后将清除此值';
+      clearBtn.disabled = true;
+    };
+    el.parentElement.appendChild(clearBtn);
+  }
+
   // Fetch npm versions
   function fetchVersions() {
     var btn = document.getElementById('refresh-versions');
@@ -559,6 +581,13 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     // Geetest
     setVal('set-geetest-captcha-id', s.geetest_captcha_id);
     setVal('set-geetest-captcha-key', s.geetest_captcha_key);
+    markSecret('set-smtp-pass', s.smtp_pass_configured);
+    markSecret('set-push-plus-key', s.push_plus_key_configured);
+    markSecret('set-push-plus-webhook', s.push_plus_webhook_configured);
+    markSecret('set-qiniu-access-key', s.qiniu_access_key_configured);
+    markSecret('set-qiniu-secret-key', s.qiniu_secret_key_configured);
+    markSecret('set-upyun-password', s.upyun_password_configured);
+    markSecret('set-geetest-captcha-key', s.geetest_captcha_key_configured);
   }).catch(function(){ toast('加载设置失败', false); });
 
   fetchVersions();
@@ -611,8 +640,34 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       geetest_captcha_id: document.getElementById('set-geetest-captcha-id').value.trim(),
       geetest_captcha_key: document.getElementById('set-geetest-captcha-key').value.trim(),
     };
+    [
+      ['smtp_pass', 'set-smtp-pass'], ['push_plus_key', 'set-push-plus-key'],
+      ['push_plus_webhook', 'set-push-plus-webhook'], ['qiniu_access_key', 'set-qiniu-access-key'],
+      ['qiniu_secret_key', 'set-qiniu-secret-key'], ['upyun_password', 'set-upyun-password'],
+      ['geetest_captcha_key', 'set-geetest-captcha-key']
+    ].forEach(function(pair) {
+      var key = pair[0], el = document.getElementById(pair[1]);
+      if (el.dataset.clearSecret === 'true') settings[key] = null;
+      else if (!el.value) delete settings[key];
+    });
     api('/settings', { method: 'PUT', body: JSON.stringify(settings) }).then(function(r) {
       toast(r.errno ? (r.errmsg || '保存失败') : '设置已保存', !r.errno);
+      if (!r.errno) {
+        ['set-smtp-pass', 'set-push-plus-key', 'set-push-plus-webhook', 'set-qiniu-access-key', 'set-qiniu-secret-key', 'set-upyun-password', 'set-geetest-captcha-key'].forEach(function(id) {
+          var el = document.getElementById(id);
+          if (!el) return;
+          if (el.dataset.clearSecret === 'true') {
+            delete el.dataset.clearSecret;
+            delete el.dataset.secretConfigured;
+            el.placeholder = '';
+            var clearBtn = el.parentElement.querySelector('[data-clear-secret="' + id + '"]');
+            if (clearBtn) clearBtn.remove();
+          } else if (el.value) {
+            el.value = '';
+            el.placeholder = '已配置，留空则保持不变';
+          }
+        });
+      }
     }).catch(function(){ toast('保存失败', false); }).finally(function(){ btn.disabled = false; });
   });
 

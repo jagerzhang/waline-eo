@@ -18,6 +18,42 @@ const EXT_BY_TYPE: Record<string, string> = {
   'image/avif': 'avif',
 };
 
+function randomSuffix(byteLength = 8): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(byteLength)), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function detectImageType(file: File): Promise<string | null> {
+  const bytes = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  const ascii = (...codes: number[]) => codes.every((code, index) => bytes[index] === code);
+  if (ascii(0xff, 0xd8, 0xff)) return 'image/jpeg';
+  if (ascii(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'image/png';
+  if (bytes.length >= 6 && String.fromCharCode(...bytes.slice(0, 6)).match(/^GIF8[79]a$/)) return 'image/gif';
+  if (bytes.length >= 12 && String.fromCharCode(...bytes.slice(0, 4)) === 'RIFF' && String.fromCharCode(...bytes.slice(8, 12)) === 'WEBP') return 'image/webp';
+  if (bytes.length >= 12 && String.fromCharCode(...bytes.slice(4, 8)) === 'ftyp' && ['avif', 'avis'].includes(String.fromCharCode(...bytes.slice(8, 12)))) return 'image/avif';
+  return null;
+}
+
+function normalizePublicDomain(value: string | null, label: string): string {
+  const domain = String(value || '').replace(/\/$/, '');
+  try {
+    const url = new URL(domain);
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error();
+  } catch {
+    throw new Error(`${label}访问域名必须是有效的 HTTP(S) 地址`);
+  }
+  return domain;
+}
+
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs = 15000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * POST /api/image - Upload image (login required)
  * multipart/form-data with `file` field
@@ -47,6 +83,9 @@ imageRoutes.post('/', async (c) => {
   if (file.size > MAX_SIZE) {
     return c.json({ errno: 1, errmsg: '文件大小不能超过 5MB' }, 400);
   }
+  if ((await detectImageType(file)) !== file.type) {
+    return c.json({ errno: 1, errmsg: '图片内容与声明的文件类型不一致' }, 400);
+  }
 
   const uploadType = (await getSetting('image_upload_type').catch(() => null)) || 'kv';
 
@@ -74,7 +113,7 @@ imageRoutes.post('/', async (c) => {
  */
 imageRoutes.get('/:key', async (c) => {
   const key = c.req.param('key');
-  if (!key) {
+  if (!key || !/^[A-Za-z0-9_-]{8,80}$/.test(key)) {
     return c.json({ errno: 1, errmsg: 'Missing key' }, 400);
   }
 
@@ -127,7 +166,7 @@ async function uploadToKV(file: File, requestUrl: string): Promise<string> {
 
   // Key: timestamp + random 6 chars
   const ts = Date.now();
-  const rand = Math.random().toString(36).slice(2, 8);
+  const rand = randomSuffix();
   const key = `${ts}-${rand}`;
 
   // Store as "mime:base64"
@@ -151,7 +190,7 @@ async function uploadToQiniu(file: File, env: Env): Promise<string> {
 
   // Generate upload token
   const ts = Date.now();
-  const rand = Math.random().toString(36).slice(2, 8);
+  const rand = randomSuffix();
   const ext = EXT_BY_TYPE[file.type] || 'jpg';
   const key = `waline/${ts}-${rand}.${ext}`;
 
@@ -172,13 +211,13 @@ async function uploadToQiniu(file: File, env: Env): Promise<string> {
   fd.append('key', key);
   fd.append('file', file);
 
-  const resp = await fetch('https://up.qiniup.com', { method: 'POST', body: fd });
+  const resp = await fetchWithTimeout('https://up.qiniup.com', { method: 'POST', body: fd });
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`七牛上传失败 (${resp.status}): ${text}`);
   }
 
-  const baseDomain = (domain || '').replace(/\/$/, '');
+  const baseDomain = normalizePublicDomain(domain, '七牛云');
   return `${baseDomain}/${key}`;
 }
 
@@ -195,14 +234,14 @@ async function uploadToUpyun(file: File, env: Env): Promise<string> {
   }
 
   const ts = Date.now();
-  const rand = Math.random().toString(36).slice(2, 8);
+  const rand = randomSuffix();
   const ext = EXT_BY_TYPE[file.type] || 'jpg';
   const key = `/waline/${ts}-${rand}.${ext}`;
 
   const auth = btoa(`${operator}:${password}`);
 
   const arrayBuffer = await file.arrayBuffer();
-  const resp = await fetch(`https://v0.api.upyun.com/${bucket}${key}`, {
+  const resp = await fetchWithTimeout(`https://v0.api.upyun.com/${bucket}${key}`, {
     method: 'PUT',
     headers: {
       'Authorization': `Basic ${auth}`,
@@ -216,6 +255,6 @@ async function uploadToUpyun(file: File, env: Env): Promise<string> {
     throw new Error(`又拍云上传失败 (${resp.status}): ${text}`);
   }
 
-  const baseDomain = (domain || '').replace(/\/$/, '');
+  const baseDomain = normalizePublicDomain(domain, '又拍云');
   return `${baseDomain}${key}`;
 }

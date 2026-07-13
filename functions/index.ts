@@ -6,7 +6,7 @@ import { commentRoutes } from './router/comment.js';
 import { articleRoutes } from './router/article.js';
 import { userRoutes } from './router/user.js';
 import { tokenRoutes } from './router/token.js';
-import { settingsRoutes } from './router/settings.js';
+import { getSetting, settingsRoutes } from './router/settings.js';
 import { oauthRoutes } from './router/oauth.js';
 import { dbRoutes } from './router/db.js';
 import { imageRoutes } from './router/image.js';
@@ -14,6 +14,7 @@ import { verificationRoutes } from './router/verification.js';
 import { getWalinePage } from './_ui/waline-page.js';
 import { getAdminPage, ADMIN_ETAG } from './_ui/admin-panel.js';
 import { getCustomSettingsPage, get404Page } from './_ui/custom-admin.js';
+import { isAllowedOrigin } from './utils/cors-origin.js';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -21,33 +22,6 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 // 按 IP 限流，防止暴力破解和滥用
 const GLOBAL_RATE_LIMIT = 120; // 每分钟最多请求数（GET/HEAD 除外）
 const GLOBAL_RATE_WINDOW = 60;  // 窗口时间（秒）
-
-function normalizeAllowedOrigin(value: string): string {
-  return value.replace(/^https?:\/\//, '').replace(/\/.*$/, '').toLowerCase();
-}
-
-function resolveAllowedOrigins(env: Env): string[] {
-  const domains = env.SECURE_DOMAINS || env.SITE_URL || '';
-  return domains
-    .split(',')
-    .map((d) => normalizeAllowedOrigin(d.trim()))
-    .filter(Boolean);
-}
-
-function isAllowedOrigin(origin: string, env: Env): boolean {
-  if (!origin) return true;
-  const allowed = resolveAllowedOrigins(env);
-  if (!allowed.length) return false;
-
-  let host = '';
-  try {
-    host = new URL(origin).host.toLowerCase();
-  } catch {
-    return false;
-  }
-
-  return allowed.some((domain) => host === domain || host.endsWith(`.${domain}`));
-}
 
 async function globalRateLimit(ip: string): Promise<boolean> {
   const key = `rl:global:${ip}`;
@@ -85,9 +59,10 @@ app.use('*', async (c, next) => {
 app.use(
   '*',
   cors({
-    origin: (origin, c) => {
+    origin: async (origin, c) => {
       if (!origin) return '';
-      return isAllowedOrigin(origin, c.env) ? origin : '';
+      const kvSiteUrl = await getSetting('site_url').catch(() => null);
+      return isAllowedOrigin(origin, c.env, kvSiteUrl || '') ? origin : '';
     },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],

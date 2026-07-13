@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
 import { getUserByEmail, updateUser } from '../db/kv-store.js';
+import { parseVerificationState, timingSafeStringEqual } from '../utils/verification-code.js';
 
 export const verificationRoutes = new Hono<{
   Bindings: Env;
@@ -19,23 +20,30 @@ verificationRoutes.get('/', async (c) => {
     return c.json({ errno: 1, errmsg: 'token and email are required' }, 400);
   }
 
+  const clientIp = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  const rateKey = `verify_limit:${clientIp}:${email.toLowerCase()}`;
+  const attempts = Number(await WALINE_KV.get(rateKey) || '0');
+  if (attempts >= 10) {
+    return c.json({ errno: 1, errmsg: 'Too many verification attempts, please try again later' }, 429);
+  }
+  await WALINE_KV.put(rateKey, String(attempts + 1), { expirationTtl: 900 });
+
   const user = await getUserByEmail(email);
   if (!user) {
-    return c.json({ errno: 1, errmsg: 'User not found' }, 404);
+    return c.json({ errno: 1, errmsg: 'Token expired or invalid' }, 400);
   }
 
   const typeStr = user.type as string;
-  const match = typeStr.match(/^verify:(\d{4}):(\d+)$/i);
+  const state = parseVerificationState(typeStr);
 
-  if (!match) {
+  if (!state) {
     // Already verified
     return c.redirect('/ui/login');
   }
 
-  const [, savedToken, expiry] = match;
-
-  if (token === savedToken && Date.now() < parseInt(expiry, 10)) {
+  if (timingSafeStringEqual(token, state.token) && Date.now() < state.expiresAt) {
     await updateUser(user.id as number, { type: 'guest' });
+    try { await WALINE_KV.delete(rateKey); } catch {}
     return c.redirect('/ui/login');
   }
 

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
@@ -16,7 +15,7 @@ async function loadTsModule(relativePath) {
     },
   }).outputText;
 
-  const dir = mkdtempSync(path.join(tmpdir(), 'waline-test-'));
+  const dir = mkdtempSync(path.join(process.cwd(), '.waline-test-'));
   const outPath = path.join(dir, `${path.basename(relativePath, '.ts')}.mjs`);
   writeFileSync(outPath, output);
   try {

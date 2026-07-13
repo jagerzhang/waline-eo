@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit",
-    "test": "node --test tests/comment-performance.test.mjs",
+    "test": "node --test tests/comment-performance.test.mjs tests/security-validation.test.mjs",
     "dev": "echo 'EdgeOne local dev not configured'",
     "deploy": "echo 'Deploy via EdgeOne console or CLI'"
   },

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
+import { generateNumericVerificationCode } from '../utils/verification-code.js';
 import { getAvatar } from '../utils/avatar.js';
 import { signJwt } from '../middleware/auth.js';
 import { getSetting, getSettings } from './settings.js';
@@ -126,7 +127,7 @@ userRoutes.post('/', async (c) => {
   const cfg = (key: string) => kvSettings[key] || (c.env as any)[key.toUpperCase()] || '';
   const hasMailService = cfg('smtp_host') || cfg('smtp_service');
 
-  const token = Array.from({ length: 6 }, () => Math.round(Math.random() * 9)).join('');
+  const token = generateNumericVerificationCode(6);
   const normalType = hasMailService
     ? `verify:${token}:${Date.now() + 1 * 60 * 60 * 1000}`
     : 'guest';
@@ -151,7 +152,7 @@ userRoutes.post('/', async (c) => {
   // If verification needed, send email
   if (!isFirst && hasMailService) {
     const siteName = cfg('site_name') || 'Waline';
-    const serverUrl = (cfg('site_url').replace(/^["']|["']$/g, '') || new URL(c.req.url).origin).replace(/\/$/, '');
+    const serverUrl = new URL(c.req.url).origin;
     const verifyUrl = `${serverUrl}/api/verification?token=${token}&email=${encodeURIComponent(email)}`;
     const safeVerifyUrl = escapeHtmlEmail(verifyUrl);
 
@@ -231,9 +232,8 @@ userRoutes.put('/password', async (c) => {
   const jwtToken = await signJwt({ id: user.id as number }, jwtSecret, 3600);
   await WALINE_KV.put(`reset:${resetCode}`, jwtToken, { expirationTtl: 3600 });
 
-  const siteUrl = cfg('site_url').replace(/^["']|["']$/g, '') || '';
   const siteName = cfg('site_name') || 'Waline';
-  const serverUrl = siteUrl ? siteUrl.replace(/\/$/, '') : new URL(c.req.url).origin;
+  const serverUrl = new URL(c.req.url).origin;
   // Use one-time code (not JWT) in the URL to prevent token leakage via browser history/logs
   const resetUrl = `${serverUrl}/api/reset-redirect?code=${resetCode}`;
   const safeResetUrl = escapeHtmlEmail(resetUrl);

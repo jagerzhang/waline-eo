@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
 import {
   getAllSettings,
+  deleteSetting,
   getSetting as kvGetSetting,
   getSettings as kvGetSettings,
   setSettings,
@@ -63,6 +64,11 @@ const ALLOWED_KEYS = new Set([
   'upyun_domain',
 ]);
 
+const SENSITIVE_KEYS = new Set([
+  'smtp_pass', 'push_plus_key', 'push_plus_webhook',
+  'qiniu_access_key', 'qiniu_secret_key', 'upyun_password', 'geetest_captcha_key',
+]);
+
 /**
  * GET /api/settings - Get all settings (admin only)
  */
@@ -76,7 +82,12 @@ settingsRoutes.get('/', async (c) => {
 
   const settings: Record<string, string> = {};
   for (const [key, value] of Object.entries(allSettings)) {
-    settings[key] = value;
+    if (SENSITIVE_KEYS.has(key)) {
+      settings[key] = '';
+      settings[`${key}_configured`] = value ? 'true' : 'false';
+    } else {
+      settings[key] = value;
+    }
   }
 
   return c.json({ errno: 0, errmsg: '', data: settings });
@@ -97,6 +108,11 @@ settingsRoutes.put('/', async (c) => {
 
   for (const [key, value] of Object.entries(body)) {
     if (!ALLOWED_KEYS.has(key)) continue;
+    if (SENSITIVE_KEYS.has(key) && value === null) {
+      await deleteSetting(key);
+      continue;
+    }
+    if (SENSITIVE_KEYS.has(key) && String(value) === '') continue;
     toSave[key] = String(value);
   }
 

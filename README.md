@@ -117,11 +117,11 @@
 
 ## 前端对接（Geetest 验证）
 
-如启用了极验验证，前端博客页面需要加载极验 SDK 并拦截 Waline 的提交流程。核心思路是劫持 `window.grecaptcha` 对象，将 Waline 的 reCAPTCHA v3 Token 流程替换为 Geetest v4 的验证流程。
+如启用了极验验证，前端博客页面需要加载极验 v4 SDK，并在 Waline 提交 `POST /api/comment` 前完成验证。PrimeEdge 博客模板会把 `getValidate()` 返回值注入评论请求，无需配置 reCAPTCHA。
 
-后端在 `POST /api/comment` 中会自动解析前端传入的 Token JSON，完成 `lot_number`、`captcha_output`、`pass_token`、`gen_time` 的签名校验。
+后端在 `POST /api/comment` 中读取 `geetest_lot_number`、`geetest_captcha_output`、`geetest_pass_token`、`geetest_gen_time`，以 Captcha Key 生成 `sign_token` 后请求极验服务端校验。ID/Key 只配置一项、字段缺失、网络超时或极验返回失败时都会拒绝评论请求。
 
-完整的前端对接代码可参考 `functions/ui/waline-page.ts` 中的实现逻辑。
+博客端公开的 Captcha ID 必须与服务端 `geetest_captcha_id` 一致，Captcha Key 只能保存在服务端环境变量或 `WALINE_KV`。完整对接代码见 PrimeEdge 博客的 `layouts/partials/waline.html`。
 
 ---
 
