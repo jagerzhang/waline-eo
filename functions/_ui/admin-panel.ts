@@ -1250,17 +1250,23 @@ const STATIC_TAIL = `;
         }
         function processTable(idx) {
           if (idx >= tables.length) {
-            log('\\n导入写入完成，正在重建评论索引...', 'info');
+            log('\\n导入写入完成，正在统一重建评论索引...', 'info');
+            setProgress('评论索引重建中...');
             api('/db/rebuild-comment-indexes', { method: 'POST' }).then(function(r) {
               if (r.errno === 0) {
                 log(r.errmsg || '评论索引重建完成', 'ok');
+                setProgress('导入和评论索引重建已完成');
               } else {
                 log('评论索引重建失败：' + (r.errmsg || 'unknown'), 'err');
+                log('可在下方“评论性能维护”中点击“重建评论索引”手动重试。', 'info');
+                setProgress('评论索引重建失败，请手动重试');
               }
               log('导入完成：成功 ' + done + ' 条，失败 ' + fail + ' 条', fail ? 'err' : 'ok');
               importBtn.disabled = false;
             }).catch(function(e) {
               log('评论索引重建请求失败：' + (e.message || ''), 'err');
+              log('可在下方“评论性能维护”中点击“重建评论索引”手动重试。', 'info');
+              setProgress('评论索引重建失败，请手动重试');
               log('导入完成：成功 ' + done + ' 条，失败 ' + fail + ' 条', fail ? 'err' : 'ok');
               importBtn.disabled = false;
             });
