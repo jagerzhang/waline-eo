@@ -156,6 +156,43 @@ dbRoutes.post('/rebuild-comment-indexes', async (c) => {
   });
 });
 
+async function importCommentWithoutIndexes(data: Record<string, any>): Promise<{ id: number }> {
+  let id = data.id as number | undefined;
+  if (id === undefined) {
+    const current = await WALINE_KV.get('meta:next_comment_id');
+    const base = current ? parseInt(String(current), 10) : 1;
+    id = Math.max(base, Date.now() * 1000 + Math.floor(Math.random() * 1000));
+    await WALINE_KV.put('meta:next_comment_id', String(id + 1));
+  }
+
+  const date = new Date();
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const now = `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+  const comment = {
+    id,
+    user_id: data.user_id ?? null,
+    comment: data.comment || '',
+    orig: data.orig || data.comment || '',
+    insertedAt: data.insertedAt || now,
+    ip: data.ip || '',
+    link: data.link || '',
+    mail: data.mail || '',
+    nick: data.nick || '',
+    pid: data.pid ?? null,
+    rid: data.rid ?? null,
+    sticky: data.sticky ?? 0,
+    status: data.status || 'approved',
+    like: data.like ?? 0,
+    ua: data.ua || '',
+    url: data.url || '',
+    createdAt: data.createdAt || now,
+    updatedAt: data.updatedAt || now,
+  };
+
+  await WALINE_KV.put(`comment:${id}`, JSON.stringify(comment));
+  return { id };
+}
+
 /**
  * POST /api/db?table=Comment - Insert row(s) into the specified table
  *
@@ -172,6 +209,7 @@ async function insertRow(
   allowedCols: Set<string>,
   body: any,
   keepObjectId: boolean,
+  batchCommentImport = false,
 ): Promise<any> {
   if (!body || typeof body !== 'object') throw new Error('Empty data');
 
@@ -198,7 +236,7 @@ async function insertRow(
   if (forcedId !== null) data.id = forcedId;
 
   if (table === 'Comment') {
-    return createComment(data);
+    return batchCommentImport ? importCommentWithoutIndexes(data) : createComment(data);
   }
   if (table === 'Counter') {
     // Import: write the full record as-is, keeping historical timestamps
@@ -251,17 +289,27 @@ dbRoutes.post('/', async (c) => {
     }
 
     let count = 0;
+    let maxCommentId = 0;
     const errors: { index: number; message: string }[] = [];
     for (let i = 0; i < rows.length; i++) {
       try {
-        const created = await insertRow(table, allowedCols, rows[i], true);
+        const created = await insertRow(table, allowedCols, rows[i], true, table === 'Comment');
         if (!created) throw new Error('Insert failed');
         count += 1;
+        if (table === 'Comment') maxCommentId = Math.max(maxCommentId, created.id);
       } catch (error) {
         // A single bad row must not abort the whole batch
         if (errors.length < 20) {
           errors.push({ index: i, message: error instanceof Error ? error.message : String(error) });
         }
+      }
+    }
+
+    if (table === 'Comment' && maxCommentId > 0) {
+      const currentRaw = await WALINE_KV.get('meta:next_comment_id');
+      const currentId = currentRaw ? parseInt(String(currentRaw), 10) : 1;
+      if (!Number.isFinite(currentId) || currentId <= maxCommentId) {
+        await WALINE_KV.put('meta:next_comment_id', String(maxCommentId + 1));
       }
     }
 
