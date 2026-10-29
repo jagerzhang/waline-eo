@@ -157,3 +157,42 @@ EdgeOne KV 中使用的键前缀说明：
 ## 开源协议
 
 [GPL-3.0](LICENSE)
+
+## 部署配置（EdgeOne Makers）
+
+本项目已在 Makers 控制台关联 GitHub 仓库，**推送即触发部署**。
+CLI 直传方式（`edgeone makers deploy`）不再可用 —— 项目 Provider 为 `Github`，
+仅支持 Git 触发，直传会报 `does not support direct folder or zip file deployment`。
+
+### 环境变量（在控制台配置，切勿写进仓库）
+
+| 变量 | 说明 |
+| --- | --- |
+| `WALINE_KV` | KV 命名空间绑定名。`edgeone.json` 已声明该 binding，在控制台把命名空间绑上去即可 |
+| `JWT_SECRET` | JWT 签名密钥 |
+| `SECURE_DOMAINS` | 允许跨域访问的域名，逗号分隔，如 `zhang.ge,zhangge.net,zgboke.com` |
+| `SITE_URL` | 站点地址，如 `https://zhang.ge` |
+
+⚠️ **`SECURE_DOMAINS` 必须配置**：CORS 逻辑在没取到该值时会拒绝全部跨域请求
+（见 `functions/utils/cors-origin.ts`：`if (!allowed.length) return false`），
+表现为前端评论接口被浏览器 CORS 策略拦截、评论完全加载不出。
+
+### 本地调试
+
+```bash
+npm install -g edgeone
+edgeone login --site china -t <API_TOKEN>
+edgeone makers link -n waline-oe
+edgeone makers dev -n waline-oe     # http://localhost:8088
+```
+
+### 已修复的问题
+
+1. **KV list 传入 `undefined` 游标** —— 设置保存返回 500
+   （`cursor type invalid. expect: 'string' get: 'undefined'`）。
+   改为只在游标有值时才传该字段，共 6 处。
+2. **layui 依赖 jsdelivr CDN** —— 国内加载失败会导致页面 JS 不执行，
+   表现为「点击保存毫无反应、无任何网络请求」。改为本地托管 `public/layui.*`。
+3. **测试邮件误要求 SMTP 用户名** —— 选择 Resend / SendGrid（HTTP API）时，
+   原校验强制要求 `smtp_user`，导致无法发送测试邮件。
+   改为按服务类型判断：HTTP API 模式只需 API Key。
