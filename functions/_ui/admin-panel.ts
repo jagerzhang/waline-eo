@@ -1206,7 +1206,7 @@ const STATIC_TAIL = `;
         log('📋 文件解析成功。Comment: ' + (data.data.Comment||[]).length + ' 条，Counter: ' + (data.data.Counter||[]).length + ' 条，Users: ' + (data.data.Users||[]).length + ' 条', 'info');
 
         /* 串行处理：清空 → 分批批量插入 */
-        var BATCH_SIZE = 300;
+        var BATCH_SIZE = 50;
         function setProgress(text) {
           var el = c.querySelector('#importProgress');
           if (el) el.textContent = text;
