@@ -172,6 +172,16 @@ async function getNextId(metaKey: string): Promise<number> {
   return id;
 }
 
+/**
+ * Import: reuse the objectId carried by the data so that pid/rid/user_id
+ * references stay valid; fall back to an auto-increment id otherwise.
+ */
+async function resolveCreateId(raw: unknown, metaKey: string): Promise<number> {
+  const parsed = typeof raw === 'number' ? raw : parseInt(String(raw ?? ''), 10);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  return getNextId(metaKey);
+}
+
 // ---------- Comment Operations ----------
 // 十万条负载优化方案：
 // 1. 根评论按 URL 分页存储 ID（每页 50 条），避免大数组
@@ -849,7 +859,7 @@ async function updateApprovedAuthorCounts(comment: KVComment, delta: number): Pr
 }
 
 export async function createComment(data: Partial<KVComment>): Promise<KVComment> {
-  const id = await getNextId('meta:next_comment_id');
+  const id = await resolveCreateId(data.id, 'meta:next_comment_id');
   const now = nowIso();
   const comment: KVComment = {
     id,
@@ -1617,7 +1627,7 @@ export async function createCounter(url: string, field: string): Promise<KVCount
 
 /** 导入专用：直接写入完整 Counter 数据，保留历史时间 */
 export async function importCounter(data: Partial<KVCounter> & { url: string }): Promise<KVCounter> {
-  const id = await getNextId('meta:next_counter_id');
+  const id = await resolveCreateId(data.id, 'meta:next_counter_id');
   const now = nowIso();
   const counter: KVCounter = {
     id,
@@ -1702,7 +1712,7 @@ export async function clearCounters(): Promise<void> {
 // ---------- User Operations ----------
 
 export async function createUser(data: Partial<KVUser>): Promise<KVUser> {
-  const id = await getNextId('meta:next_user_id');
+  const id = await resolveCreateId(data.id, 'meta:next_user_id');
   const now = nowIso();
   const user: KVUser = {
     id,
