@@ -157,19 +157,31 @@ dbRoutes.post('/rebuild-comment-indexes', async (c) => {
 });
 
 /**
- * POST /api/db?table=Comment - Insert a row into the specified table
- * Must return { errno: 0, data: { objectId } } for admin panel idMaps
+ * POST /api/db?table=Comment - Insert row(s) into the specified table
+ *
+ * Single mode (body = field object, used by the admin panel):
+ *   request  { ...fields }
+ *   response { errno: 0, data: { objectId } }
+ *
+ * Batch mode (body = { table, rows }, used for imports):
+ *   request  { table: 'Comment', rows: [{ ... }, ...] }
+ *   response { errno: 0, data: { count, failed, errors } }
  */
-dbRoutes.post('/', async (c) => {
-  const table = c.req.query('table');
-  if (!table || !TABLE_MAP[table]) {
-    return c.json({ errno: 1, errmsg: 'Invalid table' }, 400);
+async function insertRow(
+  table: string,
+  allowedCols: Set<string>,
+  body: any,
+  keepObjectId: boolean,
+): Promise<any> {
+  if (!body || typeof body !== 'object') throw new Error('Empty data');
+
+  // Batch import keeps the original objectId so pid/rid/user_id references stay valid
+  let forcedId: number | null = null;
+  if (keepObjectId) {
+    const raw = body.objectId ?? body.id;
+    const parsed = typeof raw === 'number' ? raw : parseInt(String(raw ?? ''), 10);
+    if (Number.isFinite(parsed) && parsed > 0) forcedId = parsed;
   }
-
-  const allowedCols = ALLOWED_COLUMNS[table];
-  const body = await c.req.json();
-
-  // Remove auto-generated fields
   delete body.objectId;
   delete body.id;
 
@@ -177,24 +189,24 @@ dbRoutes.post('/', async (c) => {
   const keys = Object.keys(body).filter(
     (k) => allowedCols.has(k) && body[k] !== null && body[k] !== undefined,
   );
-  if (keys.length === 0) {
-    return c.json({ errno: 1, errmsg: 'Empty data' }, 400);
-  }
+  if (keys.length === 0) throw new Error('Empty data');
 
   const data: Record<string, any> = {};
   for (const k of keys) {
     data[k] = body[k];
   }
+  if (forcedId !== null) data.id = forcedId;
 
-  let created: any;
   if (table === 'Comment') {
-    created = await createComment(data);
-  } else if (table === 'Counter') {
-    // 导入：直接写入完整数据，保留历史时间
+    return createComment(data);
+  }
+  if (table === 'Counter') {
+    // Import: write the full record as-is, keeping historical timestamps
     const url = data.url || '';
-    if (!url) return c.json({ errno: 1, errmsg: 'Counter missing url' }, 400);
+    if (!url) throw new Error('Counter missing url');
     const toNum = (v: any) => (typeof v === 'number' ? v : parseInt(String(v)) || 0);
-    created = await importCounter({
+    return importCounter({
+      id: forcedId ?? undefined,
       url,
       time:      toNum(data.time),
       reaction0: toNum(data.reaction0),
@@ -209,10 +221,61 @@ dbRoutes.post('/', async (c) => {
       createdAt: data.createdAt || undefined,
       updatedAt: data.updatedAt || undefined,
     });
-  } else if (table === 'Users') {
-    created = await createUser(data);
+  }
+  if (table === 'Users') {
+    return createUser(data);
+  }
+  return null;
+}
+
+dbRoutes.post('/', async (c) => {
+  const queryTable = c.req.query('table');
+  if (queryTable && !TABLE_MAP[queryTable]) {
+    return c.json({ errno: 1, errmsg: 'Invalid table' }, 400);
   }
 
+  const body = await c.req.json();
+  const bodyTable = body && typeof body.table === 'string' ? body.table : '';
+  const table = queryTable || bodyTable;
+  if (!table || !TABLE_MAP[table]) {
+    return c.json({ errno: 1, errmsg: 'Invalid table' }, 400);
+  }
+
+  const allowedCols = ALLOWED_COLUMNS[table];
+
+  // ---- Batch mode: { table, rows: [...] } ----
+  if (body && 'rows' in body) {
+    const rows = body.rows;
+    if (!Array.isArray(rows)) {
+      return c.json({ errno: 1, errmsg: 'Invalid rows' }, 400);
+    }
+
+    let count = 0;
+    const errors: { index: number; message: string }[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      try {
+        const created = await insertRow(table, allowedCols, rows[i], true);
+        if (!created) throw new Error('Insert failed');
+        count += 1;
+      } catch (error) {
+        // A single bad row must not abort the whole batch
+        if (errors.length < 20) {
+          errors.push({ index: i, message: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    }
+
+    return c.json({ errno: 0, data: { count, failed: rows.length - count, errors } });
+  }
+
+  // ---- Single mode: unchanged behaviour and response shape ----
+  let created: any;
+  try {
+    created = await insertRow(table, allowedCols, body, false);
+  } catch (error) {
+    const errmsg = error instanceof Error ? error.message : 'Insert failed';
+    return c.json({ errno: 1, errmsg }, 400);
+  }
   if (!created) {
     return c.json({ errno: 1, errmsg: 'Insert failed' }, 500);
   }

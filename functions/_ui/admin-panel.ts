@@ -1099,6 +1099,7 @@ const STATIC_TAIL = `;
           '<input type="file" id="importFile" accept=".json,application/json" style="display:none;">' +
           '<button class="pe-btn pe-btn-warning" id="importBtn" disabled><i class="layui-icon layui-icon-transfer"></i> 开始导入</button>' +
         '</div>' +
+        '<div id="importProgress" style="display:none;font-size:13px;font-weight:600;color:var(--pe-text-secondary);margin:0 0 10px;"></div>' +
         '<div id="importLog" class="import-log" style="display:none;"></div>' +
       '</div>' +
       '<div class="pe-card">' +
@@ -1178,6 +1179,9 @@ const STATIC_TAIL = `;
       var logEl = c.querySelector('#importLog');
       logEl.style.display = '';
       logEl.innerHTML = '';
+      var progEl = c.querySelector('#importProgress');
+      progEl.style.display = '';
+      progEl.textContent = '准备导入...';
       importBtn.disabled = true;
 
       function log(msg, type) {
@@ -1201,7 +1205,49 @@ const STATIC_TAIL = `;
         tables.forEach(function(t) { total += (data.data[t] || []).length; });
         log('📋 文件解析成功。Comment: ' + (data.data.Comment||[]).length + ' 条，Counter: ' + (data.data.Counter||[]).length + ' 条，Users: ' + (data.data.Users||[]).length + ' 条', 'info');
 
-        /* 串行处理：清空 → 逐条插入 */
+        /* 串行处理：清空 → 分批批量插入 */
+        var BATCH_SIZE = 300;
+        function setProgress(text) {
+          var el = c.querySelector('#importProgress');
+          if (el) el.textContent = text;
+        }
+        function importRows(t, rows) {
+          var i = 0, ok = 0, bad = 0;
+          function report() {
+            setProgress('已导入 ' + (ok + bad) + ' / ' + total + '（成功 ' + ok + ' 条，失败 ' + bad + ' 条）');
+          }
+          function nextBatch() {
+            if (i >= rows.length) return Promise.resolve({ ok: ok, bad: bad });
+            var chunk = rows.slice(i, i + BATCH_SIZE);
+            var from = i + 1, to = i + chunk.length;
+            i += chunk.length;
+            return api('/db?table=' + t, {
+              method: 'POST',
+              body: JSON.stringify({ table: t, rows: chunk })
+            }).then(function(r) {
+              if (r && r.errno === 0 && r.data) {
+                ok += r.data.count || 0;
+                bad += r.data.failed || 0;
+                if (r.data.errors && r.data.errors.length) {
+                  r.data.errors.slice(0, 3).forEach(function(e) {
+                    log('[' + t + '] 第 ' + (from + e.index) + ' 条失败：' + (e.message || 'unknown'), 'err');
+                  });
+                }
+              } else {
+                bad += chunk.length;
+                log('[' + t + '] 第 ' + from + '-' + to + ' 条批量写入失败：' + ((r && r.errmsg) || 'unknown'), 'err');
+              }
+              report();
+              return nextBatch();
+            }).catch(function(e) {
+              bad += chunk.length;
+              log('[' + t + '] 第 ' + from + '-' + to + ' 条网络错误：' + (e.message || ''), 'err');
+              report();
+              return nextBatch();
+            });
+          }
+          return nextBatch();
+        }
         function processTable(idx) {
           if (idx >= tables.length) {
             log('\\n导入写入完成，正在重建评论索引...', 'info');
@@ -1226,19 +1272,14 @@ const STATIC_TAIL = `;
 
           log('\\n[' + t + '] 清空旧数据...', 'info');
           api('/db?table=' + t, { method: 'DELETE' }).then(function() {
-            log('[' + t + '] 清空完成，开始写入 ' + rows.length + ' 条...', 'info');
-            var i = 0;
-            function insertNext() {
-              if (i >= rows.length) { processTable(idx + 1); return; }
-              var row = rows[i++];
-              api('/db?table=' + t, { method: 'POST', body: JSON.stringify(row) }).then(function(r) {
-                if (r.errno === 0) { done++; } else { fail++; log('[' + t + '] 第 ' + i + ' 条失败：' + (r.errmsg||'unknown'), 'err'); }
-                insertNext();
-              }).catch(function(e) { fail++; log('[' + t + '] 第 ' + i + ' 条网络错误：' + (e.message||''), 'err'); insertNext(); });
-            }
-            insertNext();
+            log('[' + t + '] 清空完成，开始分批写入 ' + rows.length + ' 条（每批 ' + BATCH_SIZE + ' 条）...', 'info');
+            return importRows(t, rows).then(function(r) {
+              done += r.ok; fail += r.bad;
+              log('[' + t + '] 写入完成：成功 ' + r.ok + ' 条，失败 ' + r.bad + ' 条', r.bad ? 'err' : 'ok');
+              processTable(idx + 1);
+            });
           }).catch(function(e) {
-            log('[' + t + '] 清空失败：' + (e.message||''), 'err');
+            log('[' + t + '] 导入失败：' + (e.message || ''), 'err');
             processTable(idx + 1);
           });
         }
