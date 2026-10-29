@@ -39,7 +39,7 @@ const TABLE_MAP: Record<string, string> = {
 };
 
 // Allowed column names per table (prevents SQL injection via dynamic column names)
-const ALLOWED_COLUMNS: Record<string, Set<string>> = {
+export const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   Comment: new Set([
     'user_id', 'comment', 'orig', 'insertedAt', 'ip', 'link', 'mail', 'nick',
     'pid', 'rid', 'sticky', 'status', 'like', 'ua', 'url', 'createdAt', 'updatedAt',
@@ -154,9 +154,94 @@ dbRoutes.post('/rebuild-comment-indexes', async (c) => {
     errmsg: `评论索引重建完成：扫描 ${result.comments} 条评论，文章 ${result.urls} 篇，子评论楼层 ${result.childThreads} 组。`,
     data: result,
   });
+/**
+ * POST /api/db/raw-batch - Direct KV batch write.
+ *
+ * Built for the offline index rebuild: the full rebuild of ~15k comments needs
+ * far more KV operations than a single edge-function invocation allows, so the
+ * computation runs locally and only the resulting key/value pairs are pushed
+ * here in small chunks. Writes are restricted to comment + derived-index
+ * prefixes, so credentials, settings and counters stay untouched.
+ */
+const RAW_WRITE_PREFIXES = [
+  'comment:',
+  'comments:',
+  'count:comments:',
+  'index:comments:',
+  'meta:comments:',
+];
+const RAW_BATCH_MAX_ITEMS = 300;
+const RAW_BATCH_CONCURRENCY = 25;
+
+dbRoutes.post('/raw-batch', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  if (!body || typeof body !== 'object') {
+    return c.json({ errno: 1, errmsg: 'Invalid body' }, 400);
+  }
+
+  const puts: { key: string; value: string }[] = Array.isArray(body.puts) ? body.puts : [];
+  const deletes: string[] = Array.isArray(body.deletes) ? body.deletes : [];
+
+  if (puts.length + deletes.length > RAW_BATCH_MAX_ITEMS) {
+    return c.json({ errno: 1, errmsg: `Too many items in one batch (max ${RAW_BATCH_MAX_ITEMS})` }, 400);
+  }
+
+  const isAllowed = (key: unknown): key is string =>
+    typeof key === 'string' && RAW_WRITE_PREFIXES.some((prefix) => key.startsWith(prefix));
+
+  for (const item of puts) {
+    if (!item || !isAllowed(item.key) || typeof item.value !== 'string') {
+      return c.json({ errno: 1, errmsg: `Key not writable: ${item?.key}` }, 400);
+    }
+  }
+  for (const key of deletes) {
+    if (!isAllowed(key)) {
+      return c.json({ errno: 1, errmsg: `Key not writable: ${key}` }, 400);
+    }
+  }
+
+  const errors: string[] = [];
+  let written = 0;
+  let removed = 0;
+
+  for (let i = 0; i < puts.length; i += RAW_BATCH_CONCURRENCY) {
+    const chunk = puts.slice(i, i + RAW_BATCH_CONCURRENCY);
+    const results = await Promise.all(chunk.map(async (item) => {
+      try {
+        await WALINE_KV.put(item.key, item.value);
+        return true;
+      } catch (error) {
+        errors.push(`put ${item.key}: ${(error as Error).message}`);
+        return false;
+      }
+    }));
+    written += results.filter(Boolean).length;
+  }
+
+  for (let i = 0; i < deletes.length; i += RAW_BATCH_CONCURRENCY) {
+    const chunk = deletes.slice(i, i + RAW_BATCH_CONCURRENCY);
+    const results = await Promise.all(chunk.map(async (key) => {
+      try {
+        await WALINE_KV.delete(key);
+        return true;
+      } catch (error) {
+        errors.push(`delete ${key}: ${(error as Error).message}`);
+        return false;
+      }
+    }));
+    removed += results.filter(Boolean).length;
+  }
+
+  return c.json({
+    errno: errors.length ? 1 : 0,
+    errmsg: errors.length ? errors.slice(0, 3).join('; ') : '',
+    data: { written, removed, errors: errors.length },
+  });
 });
 
-async function importCommentWithoutIndexes(data: Record<string, any>): Promise<{ id: number }> {
+});
+
+export async function importCommentWithoutIndexes(data: Record<string, any>): Promise<{ id: number }> {
   let id = data.id as number | undefined;
   if (id === undefined) {
     const current = await WALINE_KV.get('meta:next_comment_id');
@@ -204,7 +289,7 @@ async function importCommentWithoutIndexes(data: Record<string, any>): Promise<{
  *   request  { table: 'Comment', rows: [{ ... }, ...] }
  *   response { errno: 0, data: { count, failed, errors } }
  */
-async function insertRow(
+export async function insertRow(
   table: string,
   allowedCols: Set<string>,
   body: any,
