@@ -156,7 +156,15 @@ settingsRoutes.post('/test-mail', async (c) => {
     senderEmail: cfg('sender_email'),
   };
 
-  if (!cfg('smtp_user') || !cfg('smtp_pass')) {
+  // Resend / SendGrid 走 HTTP API，只需要 API Key（存于 smtp_pass），不需要 smtp_user
+  const mailService = cfg('smtp_service');
+  const isHttpMail = mailService === 'resend' || mailService === 'sendgrid';
+
+  if (isHttpMail) {
+    if (!cfg('smtp_pass')) {
+      return c.json({ errno: 1, errmsg: 'API Key 未配置，请先保存邮件设置' }, 400);
+    }
+  } else if (!cfg('smtp_user') || !cfg('smtp_pass')) {
     return c.json({ errno: 1, errmsg: 'SMTP 用户名或密码未配置，请先保存邮件设置' }, 400);
   }
 
