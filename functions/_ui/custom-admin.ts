@@ -26,7 +26,7 @@ export function getCustomSettingsPage(_requestUrl: string): string {
 <meta charset="utf-8">
 <title>Waline 评论设置</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/layui@2.13.5/dist/css/layui.css">
+<link rel="stylesheet" href="/layui.css">
 <style>
 :root {
   --pe-bg-base: #EEF1F6;
@@ -453,7 +453,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/layui@2.13.5/dist/layui.js"></script>
+<script src="/layui.js"></script>
 <script>
 (function(){
   var API = location.origin;

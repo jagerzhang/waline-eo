@@ -1659,7 +1659,7 @@ export async function getAllCounters(): Promise<KVCounter[]> {
   const counters: KVCounter[] = [];
   let cursor: string | undefined;
   do {
-    const list = await WALINE_KV.list({ prefix: 'counter:', cursor, limit: KV_LIST_LIMIT });
+    const list = await WALINE_KV.list(cursor ? { prefix: 'counter:', cursor, limit: KV_LIST_LIMIT } : { prefix: 'counter:', limit: KV_LIST_LIMIT });
     if (list && list.keys) {
       for (const key of list.keys) {
         // list with prefix 'counter:' should only return counter:* keys,
@@ -1677,7 +1677,7 @@ export async function getAllCounters(): Promise<KVCounter[]> {
 export async function clearCounters(): Promise<void> {
   let cursor: string | undefined;
   do {
-    const list = await WALINE_KV.list({ prefix: 'counter:', cursor, limit: KV_LIST_LIMIT });
+    const list = await WALINE_KV.list(cursor ? { prefix: 'counter:', cursor, limit: KV_LIST_LIMIT } : { prefix: 'counter:', limit: KV_LIST_LIMIT });
     if (list && list.keys) {
       for (const key of list.keys) {
         await deleteKvKey(listKeyName(key));
@@ -1688,7 +1688,7 @@ export async function clearCounters(): Promise<void> {
 
   cursor = undefined;
   do {
-    const idList = await WALINE_KV.list({ prefix: 'index:counter:id:', cursor, limit: KV_LIST_LIMIT });
+    const idList = await WALINE_KV.list(cursor ? { prefix: 'index:counter:id:', cursor, limit: KV_LIST_LIMIT } : { prefix: 'index:counter:id:', limit: KV_LIST_LIMIT });
     if (idList && idList.keys) {
       for (const key of idList.keys) {
         await deleteKvKey(listKeyName(key));
@@ -1876,7 +1876,7 @@ export async function clearUsers(): Promise<void> {
   await deleteKvKey('index:users:all');
   let cursor: string | undefined;
   do {
-    const list = await WALINE_KV.list({ prefix: 'index:user:', cursor, limit: KV_LIST_LIMIT });
+    const list = await WALINE_KV.list(cursor ? { prefix: 'index:user:', cursor, limit: KV_LIST_LIMIT } : { prefix: 'index:user:', limit: KV_LIST_LIMIT });
     if (list && list.keys) {
       for (const key of list.keys) {
         await deleteKvKey(listKeyName(key));
@@ -1915,7 +1915,7 @@ export async function getAllSettings(): Promise<Record<string, string>> {
   const settings: Record<string, string> = {};
   let cursor: string | undefined;
   do {
-    const list = await WALINE_KV.list({ prefix: 'setting:', cursor, limit: KV_LIST_LIMIT });
+    const list = await WALINE_KV.list(cursor ? { prefix: 'setting:', cursor, limit: KV_LIST_LIMIT } : { prefix: 'setting:', limit: KV_LIST_LIMIT });
     if (list && list.keys) {
       for (const key of list.keys) {
         const keyName = listKeyName(key);
@@ -1952,7 +1952,7 @@ export async function deleteSetting(key: string): Promise<void> {
 export async function clearSettings(): Promise<void> {
   let cursor: string | undefined;
   do {
-    const list = await WALINE_KV.list({ prefix: 'setting:', cursor, limit: KV_LIST_LIMIT });
+    const list = await WALINE_KV.list(cursor ? { prefix: 'setting:', cursor, limit: KV_LIST_LIMIT } : { prefix: 'setting:', limit: KV_LIST_LIMIT });
     if (list && list.keys) {
       for (const key of list.keys) {
         await deleteKvKey(listKeyName(key));
