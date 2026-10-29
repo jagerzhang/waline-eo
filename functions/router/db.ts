@@ -154,6 +154,8 @@ dbRoutes.post('/rebuild-comment-indexes', async (c) => {
     errmsg: `评论索引重建完成：扫描 ${result.comments} 条评论，文章 ${result.urls} 篇，子评论楼层 ${result.childThreads} 组。`,
     data: result,
   });
+});
+
 /**
  * POST /api/db/raw-batch - Direct KV batch write.
  *
@@ -237,7 +239,9 @@ dbRoutes.post('/raw-batch', async (c) => {
     errmsg: errors.length ? errors.slice(0, 3).join('; ') : '',
     data: { written, removed, errors: errors.length },
   });
-});
+
+// Version probe: confirms the deployed bundle contains this build.
+dbRoutes.get('/ping', (c) => c.json({ errno: 0, errmsg: '', data: { build: 'raw-batch-v1' } }));
 
 });
 
