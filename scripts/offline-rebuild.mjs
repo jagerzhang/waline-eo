@@ -33,6 +33,7 @@ const BASE = arg('base', 'https://api.zhangge.net').replace(/\/+$/, '');
 const TOKEN = arg('token', process.env.WALINE_TOKEN || '');
 const BATCH = parseInt(arg('batch', '200'), 10);
 const APPLY = has('apply');
+const ONLY = arg('only', '');
 
 // ---------------------------------------------------------------- mock KV
 const store = new Map();
@@ -165,6 +166,9 @@ if (!TOKEN) {
 
 // ------------------------------------------------------------------- push
 const endpoint = BASE + '/api/db/raw-batch?token=' + encodeURIComponent(TOKEN);
+const pushList = ONLY ? puts.filter((p) => p.key.startsWith(ONLY)) : puts;
+console.log('pushing', pushList.length, 'keys', ONLY ? '(prefix ' + ONLY + ')' : '');
+
 let done = 0;
 let failed = 0;
 
@@ -190,8 +194,8 @@ async function push(items, del) {
 
 const totalBatches = Math.ceil(puts.length / BATCH);
 let batchNo = 0;
-for (let i = 0; i < puts.length; i += BATCH) {
-  const chunk = puts.slice(i, i + BATCH);
+for (let i = 0; i < pushList.length; i += BATCH) {
+  const chunk = pushList.slice(i, i + BATCH);
   batchNo++;
   try {
     await push(chunk, []);
