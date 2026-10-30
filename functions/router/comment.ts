@@ -990,7 +990,8 @@ async function fetchFormatSettings(env?: Env): Promise<{ disableUA: boolean; aut
   return {
     disableUA: (disableUARaw === 'true') || env?.DISABLE_USERAGENT === 'true',
     authorEmail: (authorEmailRaw || env?.AUTHOR_EMAIL || '').toLowerCase().trim(),
-    linkRedirect: (linkRedirectRaw || env?.LINK_REDIRECT || '').trim(),
+    // 后台设置优先：显式清空（空串）表示关闭，要能盖住环境变量
+    linkRedirect: (linkRedirectRaw ?? env?.LINK_REDIRECT ?? '').trim(),
   };
 }
 
