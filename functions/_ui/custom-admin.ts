@@ -205,8 +205,8 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
           </div>
           <div class="pe-form-item">
             <label>评论链接跳转</label>
-            <input type="text" id="set-link-redirect" placeholder="https://zhang.ge/goto.html?url={url}" />
-            <p class="pe-desc">留空则不做处理。填写后，评论者留下的网站链接会被改写成该地址再输出（前台、接口、RSS 一致），用 <code>{url}</code> 代表原始网址，例如 <code>https://zhang.ge/goto.html?url={url}</code>。管理后台里始终显示原始网址。</p>
+            <input type="text" id="set-link-redirect" placeholder="/goto.html?url={url}" />
+            <p class="pe-desc">留空则不做处理。填写后，评论者留下的网站链接会被改写成该地址再输出（前台与开放接口一致），用 <code>{url}</code> 代表编码后的原始网址。推荐填相对路径 <code>/goto.html?url={url}</code>：浏览器按访问者当前域名解析，多域名站点各自跳自己的；填完整地址则所有域名都跳同一个。管理后台里始终显示原始网址。</p>
           </div>
         </div>
         <div class="setting-card">
