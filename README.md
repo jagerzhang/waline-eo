@@ -101,7 +101,8 @@
 | 变量名 | 说明 |
 |---|---|
 | `SECURE_DOMAINS` | 允许的跨域来源域名，多个用逗号分隔 |
-| `LINK_REDIRECT` | 评论者网站链接的跳转模板，如 `https://zhang.ge/goto.html?url={url}`；留空则不做处理 |
+| `LINK_REDIRECT` | 评论者网站链接的跳转模板，如 `https://zhang.ge/goto.html?url={url}` 或 `/goto.html?url={url}`；留空则不做处理 |
+| `LINK_REDIRECT_WHITELIST` | 不套跳转页的域名白名单，逗号分隔，如 `zhang.ge, zhangge.net` |
 | `OAUTH_URL` | 自定义 OAuth 登录服务地址 |
 | `GEETEST_CAPTCHA_ID` / `GEETEST_CAPTCHA_KEY` | 极验 CAPTCHA v4 的 ID 与 Key |
 | `RECAPTCHA_V3_KEY` / `RECAPTCHA_V3_SECRET` | 保留接口，当前主要用于前端 Geetest 对接兼容 |
@@ -117,7 +118,8 @@ https://zhang.ge/goto.html?url={url}
 ```
 
 - `{url}` 会替换成**编码后**的原始网址；模板不写 `{url}` 则按前缀拼接
-- **推荐写相对路径** `/goto.html?url={url}`：浏览器按访问者当前域名解析，多域名站点（如 `zhang.ge` / `zhangge.net`）各自跳自己的，后端不需要知道请求来自哪个域，也不会被评论列表缓存串味；填完整地址则所有域名都跳同一个
+- 模板支持**相对写法** `/goto.html?url={url}`：后端按访问者当前域名补全成绝对地址，多域名站点（如 `zhang.ge` / `zhangge.net`）各自跳自己的；也可以直接填完整地址，那样所有域名都跳同一个
+- **白名单域名不改写**：`LINK_REDIRECT_WHITELIST` 或后台「跳转白名单域名」，命中的链接原样输出（比如你自己留的博客地址）；留空时按 `SECURE_DOMAINS` / `SITE_URL` 里配置的域名判断
 - 留空 = 关闭，接口输出与未开启时完全一致（默认行为不变）
 - 后台设置优先于 `LINK_REDIRECT`：后台清空即关闭，即使环境变量里有值
 - 只改写 `http(s)` 链接，`javascript:`、`data:` 等伪协议原样返回
@@ -127,8 +129,11 @@ https://zhang.ge/goto.html?url={url}
 > 时遍历 `a[href]`）执行时评论 DOM 还没生成，评论区必然漏掉。放在评论输出的唯一出口
 > `formatComment()`，调用方一致生效，前端零改动。
 >
-> 为什么不在后端按请求域名补全成绝对地址：公开评论列表有 90 秒缓存，缓存 key 只含
-> path/page/pageSize/sortBy/version、不含域名，按域名补全的绝对地址会跨域名串味。
+> 为什么不能把相对路径直接交给前端：Waline 客户端会对 link 做 normalize
+> （`isAbsolute(link) ? link : `https://${link}``），相对路径被拼成 `https:///goto.html?url=...`，
+> 浏览器把空 host 容错成 host=goto.html，实际就跳去了一个不存在的域名。所以后端必须输出
+> 绝对地址。补全用的域名取自 Origin -> Referer -> SITE_URL，只采信已允许的来源，
+> 并且会进入评论列表缓存 key，避免 A 域的绝对地址被 B 域的请求命中。
 
 ### 4. 访问管理后台
 

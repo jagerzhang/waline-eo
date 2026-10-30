@@ -11,6 +11,7 @@ export interface Env {
   COMMENT_AUDIT?: string;
   AUTHOR_EMAIL?: string;
   LINK_REDIRECT?: string;
+  LINK_REDIRECT_WHITELIST?: string;
   LEVELS?: string;
 
   // SMTP

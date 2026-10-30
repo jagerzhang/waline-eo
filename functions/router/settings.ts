@@ -31,6 +31,7 @@ const ALLOWED_KEYS = new Set([
   'disable_region',
   'disable_useragent',
   'link_redirect',
+  'link_redirect_whitelist',
   // Content moderation
   'forbidden_words',
   // SMTP

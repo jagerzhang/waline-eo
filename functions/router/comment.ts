@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
 import { getAvatar } from '../utils/avatar.js';
-import { applyLinkRedirect } from '../utils/link-redirect.js';
+import { applyLinkRedirect, parseDomainList, resolveSiteHost } from '../utils/link-redirect.js';
+import { resolveAllowedOrigins } from '../utils/cors-origin.js';
 import { parseUA } from '../utils/ua.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { getSetting, getSettings } from './settings.js';
@@ -412,7 +413,7 @@ commentRoutes.post('/', async (c) => {
   return c.json({
     errno: 0,
     errmsg: successMsg,
-    data: await formatComment(newComment, false, c.env),
+    data: await formatComment(newComment, false, c.env, undefined, undefined, resolveRequestHost(c)),
   }, 201);
 });
 
@@ -446,7 +447,7 @@ commentRoutes.put('/:id', async (c) => {
     if (!updated) {
       return c.json({ errno: 1, errmsg: 'Comment not found' }, 404);
     }
-    return c.json({ errno: 0, errmsg: '', data: await formatComment(updated, false, c.env) });
+    return c.json({ errno: 0, errmsg: '', data: await formatComment(updated, false, c.env, undefined, undefined, resolveRequestHost(c)) });
   }
 
   // Only admin can update other fields
@@ -511,7 +512,7 @@ commentRoutes.put('/:id', async (c) => {
   if (!updated) {
     return c.json({ errno: 1, errmsg: 'Comment not found' }, 404);
   }
-  return c.json({ errno: 0, errmsg: '', data: await formatComment(updated, false, c.env) });
+  return c.json({ errno: 0, errmsg: '', data: await formatComment(updated, false, c.env, undefined, undefined, resolveRequestHost(c)) });
 });
 
 /**
@@ -743,6 +744,15 @@ function getLevelKey(cmt: any): string {
   return cmt.user_id ? `uid:${cmt.user_id}` : `mail:${cmt.mail || ''}`;
 }
 
+/** 本次请求的访问域名：Origin -> Referer -> SITE_URL，只采信已允许的来源 */
+function resolveRequestHost(c: any): string {
+  const env = c?.env as Env | undefined;
+  return resolveSiteHost(
+    { origin: c?.req?.header?.('Origin'), referer: c?.req?.header?.('Referer'), fallback: env?.SITE_URL },
+    resolveAllowedOrigins(env || {}),
+  );
+}
+
 async function getCommentList(c: any) {
   const path = c.req.query('path');
   if (!path) {
@@ -768,8 +778,10 @@ async function getCommentList(c: any) {
   const orderBy = orderMap[sortBy] || 'insertedAt DESC';
   const offset = (page - 1) * pageSize;
   const cacheVersion = canUsePublicCache ? await getCommentListVersion(path) : 0;
+  // 评论者链接按访问域名补全成绝对地址，域名必须进缓存 key，否则跨域串味
+  const requestHost = resolveRequestHost(c);
   const cacheParams = canUsePublicCache
-    ? { path, page, pageSize, sortBy, version: cacheVersion }
+    ? { path, page, pageSize, sortBy, version: cacheVersion, host: requestHost }
     : null;
 
   if (cacheParams) {
@@ -840,6 +852,7 @@ async function getCommentList(c: any) {
 
   // Pre-fetch settings once for batch formatting
   const fmtSettings = await fetchFormatSettings(c.env);
+  fmtSettings.linkRedirectHost = requestHost;
 
   // Build threaded structure
   const data = await Promise.all(
@@ -903,6 +916,7 @@ async function getRecentCommentsHandler(c: any) {
   const count = Math.min(50, Math.max(1, parseInt(c.req.query('count') || '10') || 10));
   const comments = await getRecentComments(count);
   const fmtSettings = await fetchFormatSettings(c.env);
+  fmtSettings.linkRedirectHost = resolveRequestHost(c);
 
   return c.json({
     errno: 0,
@@ -965,6 +979,7 @@ async function getAdminCommentList(c: any) {
   ]);
 
   const fmtSettings = await fetchFormatSettings(c.env);
+  fmtSettings.linkRedirectHost = resolveRequestHost(c);
 
   return c.json({
     errno: 0,
@@ -981,24 +996,40 @@ async function getAdminCommentList(c: any) {
   });
 }
 
-async function fetchFormatSettings(env?: Env): Promise<{ disableUA: boolean; authorEmail: string; linkRedirect: string }> {
-  const [disableUARaw, authorEmailRaw, linkRedirectRaw] = await Promise.all([
+interface FormatSettings {
+  disableUA: boolean;
+  authorEmail: string;
+  linkRedirect: string;
+  /** 域名白名单：命中的链接原样输出，不套跳转页 */
+  linkRedirectWhitelist: string[];
+  /** 本次请求的访问域名，用于把相对模板补全成绝对地址 */
+  linkRedirectHost?: string;
+}
+
+async function fetchFormatSettings(env?: Env): Promise<FormatSettings> {
+  const [disableUARaw, authorEmailRaw, linkRedirectRaw, whitelistRaw] = await Promise.all([
     getSetting('disable_useragent').catch(() => null),
     getSetting('author_email').catch(() => null),
     getSetting('link_redirect').catch(() => null),
+    getSetting('link_redirect_whitelist').catch(() => null),
   ]);
   return {
     disableUA: (disableUARaw === 'true') || env?.DISABLE_USERAGENT === 'true',
     authorEmail: (authorEmailRaw || env?.AUTHOR_EMAIL || '').toLowerCase().trim(),
     // 后台设置优先：显式清空（空串）表示关闭，要能盖住环境变量
     linkRedirect: (linkRedirectRaw ?? env?.LINK_REDIRECT ?? '').trim(),
+    // 白名单 = 显式配置 + 允许的跨域来源（SECURE_DOMAINS / SITE_URL）
+    linkRedirectWhitelist: [
+      ...parseDomainList(whitelistRaw || env?.LINK_REDIRECT_WHITELIST || ''),
+      ...resolveAllowedOrigins(env || {}),
+    ],
   };
 }
 
-async function formatComment(row: any, isAdmin = false, env?: Env, usersMap?: Map<number, any>, settings?: { disableUA: boolean; authorEmail: string; linkRedirect: string }) {
+async function formatComment(row: any, isAdmin = false, env?: Env, usersMap?: Map<number, any>, settings?: FormatSettings, requestHost?: string) {
   if (!row) return null;
   // Use pre-fetched settings if provided, otherwise read from KV
-  const { disableUA, authorEmail, linkRedirect } = settings || await fetchFormatSettings(env);
+  const { disableUA, authorEmail, linkRedirect, linkRedirectWhitelist, linkRedirectHost } = settings || await fetchFormatSettings(env);
   const { browser, os } = disableUA ? { browser: '', os: '' } : parseUA(row.ua || '');
 
   // Inherit nick/mail/link/type/label from Users table if user_id present
@@ -1006,7 +1037,12 @@ async function formatComment(row: any, isAdmin = false, env?: Env, usersMap?: Ma
   const nick = user?.display_name || row.nick || '';
   const mail = user?.email || row.mail || '';
   // 公开接口把网站链接包进跳转中间页；管理端保持原始网址，方便管理员核对/编辑
-  const link = isAdmin ? (user?.url || row.link || '') : applyLinkRedirect(user?.url || row.link || '', linkRedirect);
+  const link = isAdmin
+    ? (user?.url || row.link || '')
+    : applyLinkRedirect(user?.url || row.link || '', linkRedirect, {
+      host: requestHost ?? linkRedirectHost ?? '',
+      whitelist: linkRedirectWhitelist,
+    });
   const userType = user?.type || '';
   const userLabel = user?.label || '';
 
