@@ -9,7 +9,8 @@
     "dev": "echo 'EdgeOne local dev not configured'",
     "deploy": "echo 'Deploy via EdgeOne console or CLI'",
     "build:tmp": "tsc --noEmit false --rootDir functions --outDir .tmp-build",
-    "test:users": "npm run build:tmp && node scripts/test-user-upsert.mjs && node scripts/test-user-clear.mjs"
+    "test:users": "npm run build:tmp && node scripts/test-user-upsert.mjs && node scripts/test-user-clear.mjs",
+    "test:link-redirect": "npm run build:tmp && node scripts/test-link-redirect.mjs"
   },
   "repository": {
     "type": "git",

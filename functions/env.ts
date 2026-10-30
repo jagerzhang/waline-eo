@@ -10,6 +10,7 @@ export interface Env {
   AUDIT?: string;
   COMMENT_AUDIT?: string;
   AUTHOR_EMAIL?: string;
+  LINK_REDIRECT?: string;
   LEVELS?: string;
 
   // SMTP

@@ -101,10 +101,29 @@
 | 变量名 | 说明 |
 |---|---|
 | `SECURE_DOMAINS` | 允许的跨域来源域名，多个用逗号分隔 |
+| `LINK_REDIRECT` | 评论者网站链接的跳转模板，如 `https://zhang.ge/goto.html?url={url}`；留空则不做处理 |
 | `OAUTH_URL` | 自定义 OAuth 登录服务地址 |
 | `GEETEST_CAPTCHA_ID` / `GEETEST_CAPTCHA_KEY` | 极验 CAPTCHA v4 的 ID 与 Key |
 | `RECAPTCHA_V3_KEY` / `RECAPTCHA_V3_SECRET` | 保留接口，当前主要用于前端 Geetest 对接兼容 |
 | `TURNSTILE_KEY` / `TURNSTILE_SECRET` | Cloudflare Turnstile 验证（如需要） |
+
+#### 评论链接跳转（外链确认页）
+
+评论者填写的「网站」默认原样输出，前台点击即直达外站。若希望先经过站内确认页，
+配置 `LINK_REDIRECT`，或在后台 `/ui/worker-setting` 的「评论链接跳转」里填模板：
+
+```
+https://zhang.ge/goto.html?url={url}
+```
+
+- `{url}` 会替换成**编码后**的原始网址；模板不写 `{url}` 则按前缀拼接
+- 留空 = 关闭，接口输出与未开启时完全一致（默认行为不变）
+- 只改写 `http(s)` 链接，`javascript:`、`data:` 等伪协议原样返回
+- 只作用于公开输出（前台 / 开放接口 / RSS）；管理后台列表始终显示原始网址，避免编辑时把跳转地址回写进库
+
+> 为什么在后端做：Waline 是异步渲染的，前端常见的外链改写脚本（`DOMContentLoaded`
+> 时遍历 `a[href]`）执行时评论 DOM 还没生成，评论区必然漏掉。放在评论输出的唯一出口
+> `formatComment()`，三处调用方一致生效，前端零改动。
 
 ### 4. 访问管理后台
 

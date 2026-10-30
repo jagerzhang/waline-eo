@@ -203,6 +203,11 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
             <input type="text" id="set-author-email" placeholder="admin@example.com" />
             <p class="pe-desc">博主邮箱地址。新评论通知发送到此邮箱，评论者邮箱与此相同时标记为「博主」。</p>
           </div>
+          <div class="pe-form-item">
+            <label>评论链接跳转</label>
+            <input type="text" id="set-link-redirect" placeholder="https://zhang.ge/goto.html?url={url}" />
+            <p class="pe-desc">留空则不做处理。填写后，评论者留下的网站链接会被改写成该地址再输出（前台、接口、RSS 一致），用 <code>{url}</code> 代表原始网址，例如 <code>https://zhang.ge/goto.html?url={url}</code>。管理后台里始终显示原始网址。</p>
+          </div>
         </div>
         <div class="setting-card">
           <h4>安全与限制</h4>
@@ -543,6 +548,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     setVal('set-site-name', s.site_name);
     setVal('set-site-url', s.site_url);
     setVal('set-author-email', s.author_email);
+    setVal('set-link-redirect', s.link_redirect);
     setVal('set-ipqps', s.ipqps);
     setVal('set-comment-audit', s.comment_audit);
     setVal('set-disable-region', s.disable_region);
@@ -602,6 +608,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       site_name: document.getElementById('set-site-name').value.trim(),
       site_url: document.getElementById('set-site-url').value.trim(),
       author_email: document.getElementById('set-author-email').value.trim(),
+      link_redirect: document.getElementById('set-link-redirect').value.trim(),
       ipqps: document.getElementById('set-ipqps').value.trim(),
       comment_audit: document.getElementById('set-comment-audit').checked ? 'true' : 'false',
       disable_region: document.getElementById('set-disable-region').checked ? 'true' : 'false',

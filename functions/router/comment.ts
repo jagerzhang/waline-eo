@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../env.js';
 import { getAvatar } from '../utils/avatar.js';
+import { applyLinkRedirect } from '../utils/link-redirect.js';
 import { parseUA } from '../utils/ua.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { getSetting, getSettings } from './settings.js';
@@ -980,28 +981,31 @@ async function getAdminCommentList(c: any) {
   });
 }
 
-async function fetchFormatSettings(env?: Env): Promise<{ disableUA: boolean; authorEmail: string }> {
-  const [disableUARaw, authorEmailRaw] = await Promise.all([
+async function fetchFormatSettings(env?: Env): Promise<{ disableUA: boolean; authorEmail: string; linkRedirect: string }> {
+  const [disableUARaw, authorEmailRaw, linkRedirectRaw] = await Promise.all([
     getSetting('disable_useragent').catch(() => null),
     getSetting('author_email').catch(() => null),
+    getSetting('link_redirect').catch(() => null),
   ]);
   return {
     disableUA: (disableUARaw === 'true') || env?.DISABLE_USERAGENT === 'true',
     authorEmail: (authorEmailRaw || env?.AUTHOR_EMAIL || '').toLowerCase().trim(),
+    linkRedirect: (linkRedirectRaw || env?.LINK_REDIRECT || '').trim(),
   };
 }
 
-async function formatComment(row: any, isAdmin = false, env?: Env, usersMap?: Map<number, any>, settings?: { disableUA: boolean; authorEmail: string }) {
+async function formatComment(row: any, isAdmin = false, env?: Env, usersMap?: Map<number, any>, settings?: { disableUA: boolean; authorEmail: string; linkRedirect: string }) {
   if (!row) return null;
   // Use pre-fetched settings if provided, otherwise read from KV
-  const { disableUA, authorEmail } = settings || await fetchFormatSettings(env);
+  const { disableUA, authorEmail, linkRedirect } = settings || await fetchFormatSettings(env);
   const { browser, os } = disableUA ? { browser: '', os: '' } : parseUA(row.ua || '');
 
   // Inherit nick/mail/link/type/label from Users table if user_id present
   const user = row.user_id && usersMap ? usersMap.get(row.user_id) : null;
   const nick = user?.display_name || row.nick || '';
   const mail = user?.email || row.mail || '';
-  const link = user?.url || row.link || '';
+  // 公开接口把网站链接包进跳转中间页；管理端保持原始网址，方便管理员核对/编辑
+  const link = isAdmin ? (user?.url || row.link || '') : applyLinkRedirect(user?.url || row.link || '', linkRedirect);
   const userType = user?.type || '';
   const userLabel = user?.label || '';
 
