@@ -71,6 +71,8 @@
 - **导出**：后台导出数据严格对齐原版 Waline 格式，包含 `__version`、`objectId`（数字）、`type`、`version`、`time`、`tables`、`data` 等完整结构，可直接被原版 Waline 导入
 - **导入**：通过 Admin 迁移面板，支持导入原版 Waline 导出的 JSON 数据，自动重建索引与关联关系
 - **Counter / Users**：同步导出导入评论计数器与用户数据
+- **Users 为合并导入**：导入**不会**清空 Users 表，而是按 `objectId` → 邮箱匹配后合并。现有登录账号的密码与角色始终保留（角色只升不降），避免导入过程中把自己的管理员账号删掉、后续请求全部 401。如需彻底清空用户表，调用 `DELETE /api/db?table=Users&force=1`
+- **大规模评论请用离线重建**：后台导入后的索引重建在万级评论下会超出平台单次调用上限。评论数超过 3000 时后台会给出提示，此时改用 `scripts/offline-rebuild.mjs`（先 `npm run build:tmp`）
 
 ---
 
