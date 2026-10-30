@@ -14,6 +14,7 @@ const check = (name, cond, detail) => {
 };
 
 const TPL = 'https://zhang.ge/goto.html?url={url}';
+const REL = '/goto.html?url={url}';
 
 console.log('\n[case 1] 开关关闭（模板为空）时必须原样返回');
 check('空模板', applyLinkRedirect('https://a.com', '') === 'https://a.com', applyLinkRedirect('https://a.com', ''));
@@ -42,6 +43,20 @@ console.log('\n[case 5] 幂等：已改写过的值再改一次不应二次编�
 const once = applyLinkRedirect('https://a.com', TPL);
 const twice = applyLinkRedirect(once, TPL);
 check('二次改写仍是合法跳转地址', twice === 'https://zhang.ge/goto.html?url=https%3A%2F%2Fzhang.ge%2Fgoto.html%3Furl%3Dhttps%253A%252F%252Fa.com', twice);
+
+console.log('\n[case 6] 相对路径模板：输出必须保持相对，由浏览器按当前域名解析');
+const rel = applyLinkRedirect('https://atzzz.com', REL);
+check('相对路径基础', rel === '/goto.html?url=https%3A%2F%2Fatzzz.com', rel);
+check('输出不含协议与域名', /^\/[^/]/.test(rel) && rel.indexOf('://') < 0, rel);
+check('相对前缀（无占位符）', applyLinkRedirect('https://a.com/', '/goto.html?url=')
+  === '/goto.html?url=https%3A%2F%2Fa.com%2F',
+  applyLinkRedirect('https://a.com/', '/goto.html?url='));
+check('协议相对 // 开头原样保留',
+  applyLinkRedirect('https://a.com', '//zhang.ge/goto.html?url={url}')
+    === '//zhang.ge/goto.html?url=https%3A%2F%2Fa.com',
+  applyLinkRedirect('https://a.com', '//zhang.ge/goto.html?url={url}'));
+check('相对模板同样拒绝伪协议', applyLinkRedirect('javascript:alert(1)', REL) === 'javascript:alert(1)',
+  applyLinkRedirect('javascript:alert(1)', REL));
 
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
 if (fail > 0) process.exit(1);
