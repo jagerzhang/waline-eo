@@ -8,6 +8,8 @@ export interface PublicCommentListCacheParams {
   pageSize: number;
   sortBy: string;
   version: number;
+  /** 访问域名：评论者链接会按域名补全成绝对地址，域名不同则缓存不能共用 */
+  host?: string;
 }
 
 export interface CommentCacheAuthSignal {
@@ -31,6 +33,7 @@ export function buildPublicCommentListCacheKey(params: PublicCommentListCachePar
     params.pageSize,
     params.sortBy,
     params.version,
+    params.host || '',
   ]);
   return `${PUBLIC_COMMENT_LIST_CACHE_PREFIX}${fnv1a(source)}${fnv1a(reverseString(source), 0x811c9dc5 ^ source.length)}`;
 }

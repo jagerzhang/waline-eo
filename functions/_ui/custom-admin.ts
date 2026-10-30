@@ -206,7 +206,12 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
           <div class="pe-form-item">
             <label>评论链接跳转</label>
             <input type="text" id="set-link-redirect" placeholder="/goto.html?url={url}" />
-            <p class="pe-desc">留空则不做处理。填写后，评论者留下的网站链接会被改写成该地址再输出（前台与开放接口一致），用 <code>{url}</code> 代表编码后的原始网址。推荐填相对路径 <code>/goto.html?url={url}</code>：浏览器按访问者当前域名解析，多域名站点各自跳自己的；填完整地址则所有域名都跳同一个。管理后台里始终显示原始网址。</p>
+            <p class="pe-desc">留空则不做处理。填写后，评论者留下的网站链接会被改写成该地址再输出（前台与开放接口一致），用 <code>{url}</code> 代表编码后的原始网址。可以填相对写法 <code>/goto.html?url={url}</code>，后端会按访问者当前域名补全成绝对地址；也可以直接填完整地址，那样所有域名都跳同一个。管理后台里始终显示原始网址。</p>
+          </div>
+          <div class="pe-form-item">
+            <label>跳转白名单域名</label>
+            <input type="text" id="set-link-redirect-whitelist" placeholder="zhang.ge, zhangge.net" />
+            <p class="pe-desc">这些域名下的链接原样输出、不套跳转页——比如你自己留的博客地址。逗号分隔，<code>zhang.ge</code> 也会匹配它的子域。留空时按 SECURE_DOMAINS / SITE_URL 里配置的域名判断。</p>
           </div>
         </div>
         <div class="setting-card">
@@ -549,6 +554,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
     setVal('set-site-url', s.site_url);
     setVal('set-author-email', s.author_email);
     setVal('set-link-redirect', s.link_redirect);
+    setVal('set-link-redirect-whitelist', s.link_redirect_whitelist);
     setVal('set-ipqps', s.ipqps);
     setVal('set-comment-audit', s.comment_audit);
     setVal('set-disable-region', s.disable_region);
@@ -609,6 +615,7 @@ body { margin: 0; background: var(--pe-bg-base); font-family: -apple-system, Bli
       site_url: document.getElementById('set-site-url').value.trim(),
       author_email: document.getElementById('set-author-email').value.trim(),
       link_redirect: document.getElementById('set-link-redirect').value.trim(),
+      link_redirect_whitelist: document.getElementById('set-link-redirect-whitelist').value.trim(),
       ipqps: document.getElementById('set-ipqps').value.trim(),
       comment_audit: document.getElementById('set-comment-audit').checked ? 'true' : 'false',
       disable_region: document.getElementById('set-disable-region').checked ? 'true' : 'false',
