@@ -43,6 +43,7 @@ export const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   Comment: new Set([
     'user_id', 'comment', 'orig', 'insertedAt', 'ip', 'link', 'mail', 'nick',
     'pid', 'rid', 'sticky', 'status', 'like', 'ua', 'url', 'createdAt', 'updatedAt',
+    'time',
   ]),
   Counter: new Set([
     'time', 'reaction0', 'reaction1', 'reaction2', 'reaction3', 'reaction4',
@@ -257,12 +258,24 @@ export async function importCommentWithoutIndexes(data: Record<string, any>): Pr
   const date = new Date();
   const pad = (value: number) => String(value).padStart(2, '0');
   const now = `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+  // Normalise to the stored convention: no timezone suffix. The read path
+  // appends "Z" itself, so keeping one here would yield "...000ZZ" -> NaN ->
+  // a null timestamp on the client.
+  const stripZone = (value: unknown): string =>
+    typeof value === 'string' ? value.replace(/(?:[Zz]|[+-]\d{2}:?\d{2})$/, '') : '';
+  const insertedAt = stripZone(data.insertedAt) || now;
+  const createdAt = stripZone(data.createdAt) || insertedAt;
+  const updatedAt = stripZone(data.updatedAt) || insertedAt;
+  const epoch = (value: string): number => {
+    const ms = new Date(value ? value + 'Z' : '').getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  };
   const comment = {
     id,
     user_id: data.user_id ?? null,
     comment: data.comment || '',
     orig: data.orig || data.comment || '',
-    insertedAt: data.insertedAt || now,
+    insertedAt,
     ip: data.ip || '',
     link: data.link || '',
     mail: data.mail || '',
@@ -274,8 +287,11 @@ export async function importCommentWithoutIndexes(data: Record<string, any>): Pr
     like: data.like ?? 0,
     ua: data.ua || '',
     url: data.url || '',
-    createdAt: data.createdAt || now,
-    updatedAt: data.updatedAt || now,
+    createdAt,
+    updatedAt,
+    time: typeof data.time === 'number' && Number.isFinite(data.time) && data.time > 0
+      ? data.time
+      : epoch(insertedAt),
   };
 
   await WALINE_KV.put(`comment:${id}`, JSON.stringify(comment));

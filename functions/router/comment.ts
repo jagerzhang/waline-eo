@@ -32,6 +32,28 @@ import {
   getAllComments,
   type KVComment,
 } from '../db/kv-store.js';
+/**
+ * Stored timestamps follow the LeanCloud convention: no timezone suffix
+ * ("2026-01-05T23:11:09.000"), and the API appends "Z" to mark UTC.
+ *
+ * Records imported from other backends may already carry "Z" or an offset.
+ * Blindly appending another "Z" produces "...000ZZ", which Date cannot parse:
+ * getTime() returns NaN and JSON.stringify turns it into null -- i.e. the
+ * comment renders with no timestamp at all.
+ */
+const HAS_ZONE = /(?:[Zz]|[+-]\d{2}:?\d{2})$/;
+const appendUtcZone = (value?: unknown): string => {
+  if (typeof value !== 'string' || !value) return '';
+  return HAS_ZONE.test(value) ? value : value + 'Z';
+};
+const toEpochMs = (value?: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const iso = appendUtcZone(value);
+  if (!iso) return 0;
+  const ms = new Date(iso).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+};
+
 
 // Simple string hash for dedup keys
 function simpleHash(str: string): string {
@@ -642,7 +664,7 @@ commentRoutes.get('/rss', async (c) => {
       title: `${nick} commented${comment.url ? ` on ${comment.url}` : ''}`,
       link: itemLink || commentUrl,
       guid: String(comment.id),
-      pubDate: comment.insertedAt ? new Date(comment.insertedAt + 'Z').toUTCString() : new Date().toUTCString(),
+      pubDate: toEpochMs(comment.insertedAt) ? new Date(toEpochMs(comment.insertedAt)).toUTCString() : new Date().toUTCString(),
       description: comment.comment || '',
     };
   });
@@ -993,9 +1015,9 @@ async function formatComment(row: any, isAdmin = false, env?: Env, usersMap?: Ma
     avatar,
     browser,
     os,
-    time: row.insertedAt ? new Date(row.insertedAt + 'Z').getTime() : 0,
-    insertedAt: row.insertedAt ? row.insertedAt + 'Z' : '',
-    createdAt: row.createdAt ? row.createdAt + 'Z' : '',
+    time: toEpochMs(row.insertedAt),
+    insertedAt: appendUtcZone(row.insertedAt),
+    createdAt: appendUtcZone(row.createdAt),
     status: row.status,
     like: row.like || 0,
     url: row.url,
