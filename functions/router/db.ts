@@ -16,6 +16,7 @@ import {
   clearUsers,
   createComment,
   createUser,
+  upsertUserForImport,
   importCounter,
   updateComment,
   updateUser,
@@ -314,7 +315,7 @@ export async function insertRow(
   allowedCols: Set<string>,
   body: any,
   keepObjectId: boolean,
-  batchCommentImport = false,
+  importMode = false,
 ): Promise<any> {
   if (!body || typeof body !== 'object') throw new Error('Empty data');
 
@@ -341,7 +342,7 @@ export async function insertRow(
   if (forcedId !== null) data.id = forcedId;
 
   if (table === 'Comment') {
-    return batchCommentImport ? importCommentWithoutIndexes(data) : createComment(data);
+    return importMode ? importCommentWithoutIndexes(data) : createComment(data);
   }
   if (table === 'Counter') {
     // Import: write the full record as-is, keeping historical timestamps
@@ -366,7 +367,9 @@ export async function insertRow(
     });
   }
   if (table === 'Users') {
-    return createUser(data);
+    // Import merges instead of replacing: clearing Users first would delete the
+    // account that is running the import and lock it out with 401.
+    return importMode ? upsertUserForImport(data) : createUser(data);
   }
   return null;
 }
@@ -494,13 +497,16 @@ dbRoutes.delete('/', async (c) => {
     return c.json({ errno: 1, errmsg: 'Invalid table' }, 400);
   }
 
+  let clearInfo: { removed: number; preserved: number } | undefined;
   if (table === 'Comment') {
     await clearComments();
   } else if (table === 'Counter') {
     await clearCounters();
   } else if (table === 'Users') {
-    await clearUsers();
+    // Wiping every user also wipes whoever issued the request, and from then on
+    // every admin call answers 401. Keep administrators unless ?force=1 is set.
+    clearInfo = await clearUsers({ preserveAdmins: c.req.query('force') !== '1' });
   }
 
-  return c.json({ errno: 0 });
+  return c.json({ errno: 0, data: clearInfo });
 });

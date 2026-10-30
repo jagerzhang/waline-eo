@@ -1090,7 +1090,7 @@ const STATIC_TAIL = `;
       '</div>' +
       '<div class="pe-card">' +
         '<div class="pe-card-title">导入数据</div>' +
-        '<p style="font-size:13px;color:var(--pe-text-secondary);margin:0 0 4px;">选择 Waline 标准格式的 JSON 文件。导入前将<strong style="color:var(--pe-danger);">清空</strong>对应表中的现有数据，请先导出备份。</p>' +
+        '<p style="font-size:13px;color:var(--pe-text-secondary);margin:0 0 4px;">选择 Waline 标准格式的 JSON 文件。导入前将<strong style="color:var(--pe-danger);">清空</strong> Comment、Counter 表中的现有数据；<strong>Users 不会被清空</strong>，按 objectId / 邮箱合并更新，现有登录账号及其密码、角色均保留。请先导出备份。</p>' +
         '<p style="font-size:12px;color:var(--pe-text-muted);margin:0 0 14px;">支持来自 @waline/admin 或本系统导出的 JSON 文件（含 Comment、Counter、Users）。</p>' +
         '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;">' +
           '<label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;padding:7px 14px;border:1px solid var(--pe-border);border-radius:var(--pe-radius-sm);background:var(--pe-bg-input);font-size:13px;" id="fileLabel">' +
@@ -1174,7 +1174,7 @@ const STATIC_TAIL = `;
     importBtn.addEventListener('click', function() {
       var file = fileInput.files && fileInput.files[0];
       if (!file) return;
-      if (!confirm('导入将清空现有的 Comment、Counter、Users 数据，确定继续？')) return;
+      if (!confirm('导入将清空现有的 Comment、Counter 数据（Users 按邮箱合并，不会删除现有账号），确定继续？')) return;
 
       var logEl = c.querySelector('#importLog');
       logEl.style.display = '';
@@ -1204,6 +1204,11 @@ const STATIC_TAIL = `;
         var total = 0, done = 0, fail = 0;
         tables.forEach(function(t) { total += (data.data[t] || []).length; });
         log('📋 文件解析成功。Comment: ' + (data.data.Comment||[]).length + ' 条，Counter: ' + (data.data.Counter||[]).length + ' 条，Users: ' + (data.data.Users||[]).length + ' 条', 'info');
+        var commentCount = (data.data.Comment || []).length;
+        if (commentCount > 3000) {
+          log('⚠️ 评论数量较多（' + commentCount + ' 条），导入后的索引重建可能在平台上超时，导致评论查不到。', 'err');
+          log('   建议改用仓库中的 scripts/offline-rebuild.mjs 离线重建索引，见 README。', 'info');
+        }
 
         /* 串行处理：清空 → 分批批量插入 */
         var BATCH_SIZE = 50;
@@ -1275,6 +1280,22 @@ const STATIC_TAIL = `;
           var t = tables[idx];
           var rows = data.data[t] || [];
           if (!rows.length) { log('[' + t + '] 无数据，跳过', 'info'); processTable(idx + 1); return; }
+
+          /* Users must never be cleared here: the account running the import lives
+             in that table. Deleting it makes every later admin request (including
+             writing Users back and rebuilding indexes) fail with 401. */
+          if (t === 'Users') {
+            log('\\n[Users] 合并导入（不清空现有账号，按 objectId / 邮箱匹配更新）...', 'info');
+            importRows(t, rows).then(function(r) {
+              done += r.ok; fail += r.bad;
+              log('[Users] 合并完成：成功 ' + r.ok + ' 条，失败 ' + r.bad + ' 条', r.bad ? 'err' : 'ok');
+              processTable(idx + 1);
+            }).catch(function(e) {
+              log('[Users] 导入失败：' + (e.message || ''), 'err');
+              processTable(idx + 1);
+            });
+            return;
+          }
 
           log('\\n[' + t + '] 清空旧数据...', 'info');
           api('/db?table=' + t, { method: 'DELETE' }).then(function() {

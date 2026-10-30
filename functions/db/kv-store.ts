@@ -1781,6 +1781,82 @@ export async function getUserBySocial(field: string, value: string): Promise<KVU
   return getUserById(parseInt(idStr));
 }
 
+/**
+ * Roles ranked so an import can never demote an existing account.
+ */
+const ROLE_RANK: Record<string, number> = {
+  guest: 0,
+  contributor: 1,
+  editor: 2,
+  administrator: 3,
+};
+
+/**
+ * Merge a user coming from an import.
+ *
+ * The admin panel used to clear a table and then write it back. With Users that
+ * deletes the very account performing the import: afterwards every admin request
+ * -- including writing Users back and rebuilding the comment indexes -- fails
+ * with 401, because the auth middleware can no longer resolve the token's user.
+ * The import locks itself out half way through.
+ *
+ * Users is therefore merged instead of replaced. Match order:
+ *   1. original objectId (keeps user_id references on comments valid)
+ *   2. email
+ *   3. neither -> create a new record
+ *
+ * Existing credentials and roles win: an import is meant to restore comments,
+ * not to reset somebody's password or demote an administrator.
+ */
+export async function upsertUserForImport(data: Partial<KVUser>): Promise<KVUser> {
+  // insertRow() normalises objectId into `id`; accept either so this stays
+  // safe when called directly with a raw export row.
+  const rawId = typeof data.id === 'number' ? data.id : parseInt(String((data as any).objectId ?? ''), 10);
+
+  let existing: KVUser | null = null;
+  if (Number.isFinite(rawId) && rawId > 0) {
+    existing = await getUserById(rawId);
+  }
+  if (!existing && data.email) {
+    existing = await getUserByEmail(data.email);
+  }
+  if (!existing) {
+    return createUser(data);
+  }
+
+  const isBlank = (value: unknown) => value === undefined || value === null || value === '';
+  const pick = (incoming: unknown, current: unknown) => (isBlank(incoming) ? current : incoming);
+  const rank = (role?: string) => ROLE_RANK[role || ''] ?? 0;
+
+  const patch: Partial<KVUser> = {
+    display_name: pick(data.display_name, existing.display_name) as string,
+    label: pick(data.label, existing.label) as string,
+    url: pick(data.url, existing.url) as string,
+    avatar: pick(data.avatar, existing.avatar) as string,
+    github: pick(data.github, existing.github) as string,
+    twitter: pick(data.twitter, existing.twitter) as string,
+    facebook: pick(data.facebook, existing.facebook) as string,
+    google: pick(data.google, existing.google) as string,
+    weibo: pick(data.weibo, existing.weibo) as string,
+    qq: pick(data.qq, existing.qq) as string,
+    '2fa': pick(data['2fa'], existing['2fa']) as string,
+    // Never let an import replace working credentials or demote an admin.
+    password: existing.password || data.password || '',
+    type: rank(existing.type) >= rank(data.type) ? existing.type : (data.type as string),
+  };
+  if (data.email && data.email !== existing.email) {
+    patch.email = data.email;
+  }
+
+  const updated = await updateUser(existing.id, patch);
+  if (updated) {
+    // The record predates this import, so make sure it is in the id index.
+    await addId('index:users:all', existing.id, true);
+    return updated;
+  }
+  return existing;
+}
+
 export async function updateUser(id: number, data: Partial<KVUser>): Promise<KVUser | null> {
   const user = await getUserById(id);
   if (!user) return null;
@@ -1878,23 +1954,77 @@ export async function getAllUsers(): Promise<KVUser[]> {
   return users.filter((u): u is KVUser => u !== null);
 }
 
-export async function clearUsers(): Promise<void> {
+/**
+ * Remove users.
+ *
+ * With `preserveAdmins`, administrator accounts are kept. Wiping every user also
+ * wipes whoever issued the request, and from that point on every admin endpoint
+ * (including the rest of an import) answers 401 -- the caller locks itself out.
+ * Callers that genuinely want everything gone pass `force`.
+ */
+export async function clearUsers(
+  options: { preserveAdmins?: boolean } = {},
+): Promise<{ removed: number; preserved: number }> {
+  const preserve = options.preserveAdmins === true;
   const ids = await getIds('index:users:all');
+  const kept: number[] = [];
+  let removed = 0;
+
   for (const id of ids) {
+    const user = await getUserById(id);
+    if (preserve && user?.type === 'administrator') {
+      kept.push(id);
+      continue;
+    }
     await deleteKvKey(`user:${id}`);
+    removed += 1;
   }
-  await deleteKvKey('index:users:all');
+
+  // Rebuild the id index with whatever survived instead of dropping it,
+  // otherwise the preserved admins become unreachable.
+  if (kept.length) {
+    await putJson('index:users:all', kept);
+  } else {
+    await deleteKvKey('index:users:all');
+  }
+
+  const keepIndexKeys = new Set<string>();
+  for (const id of kept) {
+    const user = await getUserById(id);
+    if (!user) continue;
+    if (user.email) keepIndexKeys.add(`index:user:email:${user.email}`);
+    for (const field of ['github', 'twitter', 'facebook', 'google', 'weibo', 'qq'] as const) {
+      const value = (user as unknown as Record<string, unknown>)[field];
+      if (typeof value === 'string' && value) {
+        keepIndexKeys.add(`index:user:social:${field}:${value}`);
+      }
+    }
+  }
+
   let cursor: string | undefined;
   do {
-    const list = await WALINE_KV.list(cursor ? { prefix: 'index:user:', cursor, limit: KV_LIST_LIMIT } : { prefix: 'index:user:', limit: KV_LIST_LIMIT });
+    const list = await WALINE_KV.list(
+      cursor
+        ? { prefix: 'index:user:', cursor, limit: KV_LIST_LIMIT }
+        : { prefix: 'index:user:', limit: KV_LIST_LIMIT },
+    );
     if (list && list.keys) {
       for (const key of list.keys) {
-        await deleteKvKey(listKeyName(key));
+        const name = listKeyName(key);
+        if (keepIndexKeys.has(name)) continue;
+        await deleteKvKey(name);
       }
     }
     cursor = list?.cursor || undefined;
   } while (cursor);
-  await WALINE_KV.put('meta:next_user_id', '1');
+
+  // Only rewind the id counter when nothing survived, otherwise new users
+  // would collide with the preserved admins' ids.
+  if (!kept.length) {
+    await WALINE_KV.put('meta:next_user_id', '1');
+  }
+
+  return { removed, preserved: kept.length };
 }
 
 // ---------- Settings Operations ----------
