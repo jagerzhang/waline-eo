@@ -700,8 +700,11 @@ function getLevel(count: number, levels: number[]): number {
   return level;
 }
 
-async function getLevelsConfig(): Promise<number[] | false> {
-  const raw = await getSetting('levels').catch(() => null);
+export async function getLevelsConfig(env?: Env): Promise<number[] | false> {
+  const kvRaw = await getSetting('levels').catch(() => null);
+  // 后台 KV 设置优先；未配置时回退到环境变量 LEVELS，便于在 Makers 控制台一键关闭等级，
+  // 彻底跳过等级计算及相关的计数 KV 读取，无需改代码或重新部署。
+  const raw = kvRaw === null || kvRaw === undefined ? (env?.LEVELS ?? null) : kvRaw;
   if (raw === null || raw === undefined) {
     // Default levels
     return [0, 10, 20, 50, 100, 200];
@@ -710,9 +713,9 @@ async function getLevelsConfig(): Promise<number[] | false> {
   return raw.split(/\s*,\s*/).map(Number).filter((n) => !isNaN(n));
 }
 
-async function computeLevels(comments: any[]): Promise<Map<string, number>> {
+export async function computeLevels(comments: any[], env?: Env): Promise<Map<string, number>> {
   const levelMap = new Map<string, number>();
-  const levels = await getLevelsConfig();
+  const levels = await getLevelsConfig(env);
   if (!levels) return levelMap;
 
   // Collect unique user_ids and mails for anonymous users
@@ -848,7 +851,7 @@ async function getCommentList(c: any) {
   }
 
   // Compute levels in batch
-  const levelMap = await computeLevels(allComments);
+  const levelMap = await computeLevels(allComments, c.env);
 
   // Pre-fetch settings once for batch formatting
   const fmtSettings = await fetchFormatSettings(c.env);
