@@ -762,15 +762,6 @@ export async function getMailCommentCount(mail: string): Promise<number> {
   return counts.get(normalizeMail(mail)) || 0;
 }
 
-async function getApprovedCommentsForCounting(): Promise<KVComment[]> {
-  const pages = await getStatusPages('approved');
-  const pageIdsArrays = await Promise.all(
-    Array.from({ length: pages }, (_, page) => getStatusPageIds('approved', page)),
-  );
-  const allIds = pageIdsArrays.flat();
-  return (await getCommentsByIds(allIds)).filter((c) => c.status === 'approved');
-}
-
 export async function getUserCommentCounts(userIds: number[]): Promise<Map<number, number>> {
   const normalizedIds = Array.from(new Set(
     userIds
@@ -793,16 +784,13 @@ export async function getUserCommentCounts(userIds: number[]): Promise<Map<numbe
   );
 
   if (missing.length > 0) {
-    const missingSet = new Set(missing);
+    // 计数键由离线重建脚本（scripts/offline-rebuild.mjs）全量预置，并在审核/发表时由
+    // updateApprovedAuthorCounts -> incNumberKeyIfInitialized 增量维护（只递增已初始化的键）。
+    // 在线评论列表请求绝不承担全表计算：历史实现会在计数键缺失时扫描全部 approved 评论
+    // （约 15000 条逐条 KV get），在 EdgeOne Edge Function 上耗尽 CPU/时间预算并返回 545，
+    // 扫描超时又导致计数缓存写不进去，形成死循环。缺失时把计数降级为 0（等级降为 0 级），
+    // 只影响等级展示，不影响评论列表本身，也不把 0 固化回 KV 以免污染后续增量。
     for (const id of missing) result.set(id, 0);
-    const comments = await getApprovedCommentsForCounting();
-    for (const comment of comments) {
-      const userId = comment.user_id;
-      if (userId !== null && missingSet.has(userId)) {
-        result.set(userId, (result.get(userId) || 0) + 1);
-      }
-    }
-    await Promise.all(missing.map((id) => putNumberKey(countKeyUserApproved(id), result.get(id) || 0)));
   }
 
   return result;
@@ -830,16 +818,10 @@ export async function getMailCommentCounts(mails: string[]): Promise<Map<string,
   );
 
   if (missing.length > 0) {
-    const missingSet = new Set(missing);
+    // 同 getUserCommentCounts：计数键由离线重建脚本预置、审核时增量维护，在线请求绝不做
+    // approved 全表扫描，否则 15k 规模会耗尽 Edge Function CPU/时间预算并返回 545。缺失时
+    // 降级为 0 级，不固化 0，不影响评论列表本身。
     for (const mail of missing) result.set(mail, 0);
-    const comments = await getApprovedCommentsForCounting();
-    for (const comment of comments) {
-      const mail = normalizeMail(comment.mail || '');
-      if (mail && missingSet.has(mail)) {
-        result.set(mail, (result.get(mail) || 0) + 1);
-      }
-    }
-    await Promise.all(missing.map((mail) => putNumberKey(countKeyMailApproved(mail), result.get(mail) || 0)));
   }
 
   return result;
